@@ -12,3 +12,4 @@ path = "src/kernel/main.rs"
 
 [dependencies]
 aarch64-cpu = "*"
+tock-registers = "*"

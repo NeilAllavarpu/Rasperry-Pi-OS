@@ -4,6 +4,7 @@
 #![no_std]
 #![feature(format_args_nl)]
 #![feature(panic_info_message)]
+#![feature(const_option)]
 
 #[path = "../architecture/architecture.rs"]
 mod architecture;
@@ -14,10 +15,9 @@ mod mutex;
 pub use mutex::Mutex;
 mod per_core;
 pub use per_core::PerCore;
-
-use crate::architecture::core_id;
 mod print;
 mod serial;
+mod timer;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -28,7 +28,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 
     println!(
         "*** PANIC on core {} (at {}:{}:{}):\n  {}",
-        core_id(),
+        architecture::core_id(),
         file,
         line,
         column,
@@ -52,7 +52,7 @@ fn init() -> ! {
     }
 
     board::wake_all_cores();
-
+    timer::wait_at_least(core::time::Duration::new(2, 0));
     per_core_init()
 }
 
@@ -63,7 +63,7 @@ fn per_core_init() -> ! {
     {
         static IS_FIRST_INIT: PerCore<bool> = PerCore::new(true);
         assert!(IS_FIRST_INIT.with_current(|is_first| core::mem::replace(is_first, false)));
-        println!("*** Per-core sequence loaded on core {} ***", core_id());
+        println!("*** Per-core sequence loaded on core {} ***", architecture::core_id());
     }
     todo!()
 }
