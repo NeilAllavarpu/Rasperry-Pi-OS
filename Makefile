@@ -8,7 +8,7 @@ TARGET            = aarch64-unknown-none-softfloat
 KERNEL_BIN        = kernel8.img
 QEMU_BINARY       = qemu-system-aarch64
 QEMU_MACHINE_TYPE = raspi3
-QEMU_RELEASE_ARGS = -d in_asm -display none
+QEMU_RELEASE_ARGS = -serial stdio -display none -smp 4
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
@@ -17,21 +17,12 @@ LD_SCRIPT_PATH    = $(shell pwd)/src/board
 # Export for build.rs.
 export LD_SCRIPT_PATH
 
-##--------------------------------------------------------------------------------------------------
-## Targets and Prerequisites
-##--------------------------------------------------------------------------------------------------
-KERNEL_MANIFEST      = Cargo.toml
+# Dependencies
 KERNEL_LINKER_SCRIPT = kernel.ld
-LAST_BUILD_CONFIG    = target/kernel.build_config
+KERNEL_ELF      	 ?= target/$(TARGET)/debug/kernel
+KERNEL_ELF_DEPS = $(shell ls src/**/*)
 
-KERNEL_ELF      = target/$(TARGET)/release/kernel
-# This parses cargo's dep-info file.
-# https://doc.rust-lang.org/cargo/guide/build-cache.html#dep-info-files
-KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
-
-##--------------------------------------------------------------------------------------------------
-## Command building blocks
-##--------------------------------------------------------------------------------------------------
+# Rust + other build things
 RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
     -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
     -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) \
@@ -41,8 +32,7 @@ RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D warnings                   \
     -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET) \
-    --release
+COMPILER_ARGS = --target=$(TARGET) $(EXTRA_COMPILER_ARGS)
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
@@ -53,42 +43,23 @@ OBJCOPY_CMD = rust-objcopy \
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 
-##------------------------------------------------------------------------------
-## Dockerization
-##------------------------------------------------------------------------------
-DOCKER_IMAGE 				:= rustembedded/osdev-utils:2021.12
+# Docker
+DOCKER_IMAGE 				= rustembedded/osdev-utils:2021.12
 DOCKER_CMD          = docker run -t --rm -v $(shell pwd):/work/tutorial -w /work/tutorial
 DOCKER_CMD_INTERACT = $(DOCKER_CMD) -i
-
-# DOCKER_IMAGE defined in include file (see top of this file).
 DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
 DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)
 
-##--------------------------------------------------------------------------------------------------
-## Targets
-##--------------------------------------------------------------------------------------------------
 .PHONY: all doc qemu clippy clean readelf objdump nm check
 
 all: $(KERNEL_BIN)
 
-##------------------------------------------------------------------------------
-## Save the configuration as a file, so make understands if it changed.
-##------------------------------------------------------------------------------
-$(LAST_BUILD_CONFIG):
-	@rm -f target/*.build_config
-	@mkdir -p target
-	@touch $(LAST_BUILD_CONFIG)
-
-##------------------------------------------------------------------------------
-## Compile the kernel ELF
-##------------------------------------------------------------------------------
+# Compile the kernel
 $(KERNEL_ELF): $(KERNEL_ELF_DEPS)
 	$(call color_header, "Compiling kernel ELF")
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
 
-##------------------------------------------------------------------------------
-## Generate the stripped kernel binary
-##------------------------------------------------------------------------------
+# Generate binary
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(call color_header, "Generating stripped binary")
 	@$(OBJCOPY_CMD) $(KERNEL_ELF) $(KERNEL_BIN)
@@ -97,37 +68,16 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(call color_progress_prefix, "Size")
 	$(call disk_usage_KiB, $(KERNEL_BIN))
 
-##------------------------------------------------------------------------------
-## Generate the documentation
-##------------------------------------------------------------------------------
-doc:
-	$(call color_header, "Generating docs")
-	@$(DOC_CMD) --document-private-items --open
-
-##------------------------------------------------------------------------------
-## Run the kernel in QEMU
-##------------------------------------------------------------------------------
-ifeq ($(QEMU_MACHINE_TYPE),) # QEMU is not supported for the board.
-
-qemu:
-	$(call color_header, "$(QEMU_MISSING_STRING)")
-
-else # QEMU is supported.
-
+# Running in QEMU
 qemu: $(KERNEL_BIN)
 	$(call color_header, "Launching QEMU")
 	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN)
-endif
 
-##------------------------------------------------------------------------------
-## Run clippy
-##------------------------------------------------------------------------------
+# Clippy
 clippy:
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(CLIPPY_CMD)
 
-##------------------------------------------------------------------------------
-## Clean
-##------------------------------------------------------------------------------
+# Cleans all build stuff
 clean:
 	rm -rf target $(KERNEL_BIN)
 

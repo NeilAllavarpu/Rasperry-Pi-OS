@@ -1,5 +1,7 @@
 // Architecture-specific (ARM) code
-use core::arch::global_asm;
-
-#[cfg(target_arch = "aarch64")]
-global_asm!(include_str!("boot.s"));
+mod boot;
+pub use boot::*;
+mod machine;
+pub use machine::*;
+mod spinlock;
+pub use spinlock::*;
