@@ -1,22 +1,25 @@
 // Architecture-specific (ARM) code
 mod boot;
 mod machine;
-use aarch64_cpu::{registers::{HCR_EL2, SPSR_EL2, ELR_EL2, SP_EL1}, asm::eret};
+use aarch64_cpu::{registers::{HCR_EL2, SPSR_EL2, ELR_EL2, SP_EL1, SP}, asm::eret};
 pub use machine::*;
 mod spinlock;
 pub use spinlock::*;
 mod config;
 pub use config::*;
-use tock_registers::interfaces::Writeable;
+use tock_registers::interfaces::{Readable, Writeable};
 
-use crate::{call_once, exception::PrivilegeLevel, init};
+use crate::{call_once, PrivilegeLevel, call_once_per_core};
 extern "C" {
     fn _start();
 }
 
+/// Switches the core from EL2 to EL1
+/// Switches to the given stack pointer
+/// Jumps to the main init sequence
 #[no_mangle]
 fn el2_init() {
-    call_once!();
+    call_once_per_core!();
     // Make sure this is running in EL2
     assert_eq!(exception_level(), PrivilegeLevel::Hypervisor);
     // Enable 64 bit mode for EL1
@@ -30,8 +33,13 @@ fn el2_init() {
             + SPSR_EL2::M::EL1h,
     );
     // Begin execution with the main init sequence
-    ELR_EL2.set(init as *const () as u64);
-    // Set an appropriate stack pointer
-    SP_EL1.set(_start as *const () as u64);
+    ELR_EL2.set(crate::init as *const () as u64);
+    // Set the stack pointer when execution resumes
+    SP_EL1.set(SP.get());
     eret();
+}
+
+pub fn init() {
+    call_once!();
+    config::init();
 }

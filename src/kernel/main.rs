@@ -5,6 +5,7 @@
 #![feature(format_args_nl)]
 #![feature(panic_info_message)]
 #![feature(const_option)]
+#![feature(once_cell)]
 
 #[path = "../architecture/architecture.rs"]
 mod architecture;
@@ -12,8 +13,8 @@ mod architecture;
 mod board;
 
 mod exception;
-mod macros;
 mod mutex;
+mod once;
 mod per_core;
 mod print;
 mod serial;
@@ -21,6 +22,7 @@ mod timer;
 
 pub use exception::*;
 pub use mutex::*;
+pub use once::*;
 pub use per_core::*;
 pub use timer::*;
 
@@ -48,22 +50,21 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// Global initialization of the system
 #[no_mangle]
 fn init() -> ! {
-    // Must only be run once
-    call_once!();
+    if architecture::core_id() == 0 {
+        // This is the global initialization sequence; it should only run once
+        call_once!();
 
-    // Make sure this is running in EL1
-    assert_eq!(
-        architecture::exception_level(),
-        exception::PrivilegeLevel::Kernel
-    );
+        // Initialize architecture-specific items
+        architecture::init();
 
-    // Initialize board-specific items
-    board::init();
+        // Initialize board-specific items
+        board::init();
 
-    println!("What just happened? Why am I here?");
+        println!("What just happened? Why am I here?");
 
-    board::wake_all_cores();
-    wait_at_least(core::time::Duration::new(2, 0));
+        board::wake_all_cores();
+    }
+
     per_core_init()
 }
 
@@ -71,10 +72,16 @@ fn init() -> ! {
 #[no_mangle]
 fn per_core_init() -> ! {
     // Must only be called once per core
-    static IS_FIRST_INIT: PerCore<bool> = PerCore::new(true);
-    assert!(IS_FIRST_INIT.with_current(|is_first| core::mem::replace(is_first, false)));
+    call_once_per_core!();
+
+    // Make sure this is running in EL1
+    assert_eq!(
+        architecture::exception_level(),
+        exception::PrivilegeLevel::Kernel
+    );
+
     println!(
-        "*** Per-core sequence loaded on core {} ***",
+        "What just happened? Why is {} here?",
         architecture::core_id()
     );
 
