@@ -1,7 +1,7 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-const NUM_CORES: usize = 4;
+const MAX_CORES: usize = 4;
 
 struct PerCoreEntry<T> {
     is_available: AtomicBool,
@@ -19,7 +19,7 @@ impl<T> PerCoreEntry<T> {
 
 /// Provides access to a list of items per-core
 pub struct PerCoreInner<T> {
-    data: [PerCoreEntry<T>; NUM_CORES],
+    data: [PerCoreEntry<T>; MAX_CORES],
 }
 
 impl<T: Copy> PerCoreInner<T> {
@@ -44,7 +44,7 @@ impl<T: Copy> PerCoreInner<T> {
     /// while using the core's value
     pub fn with_current<'a, R>(&'a mut self, f: impl FnOnce(&'a mut T) -> R) -> R {
         let core_id: usize = crate::architecture::core_id() as usize;
-        assert!(core_id < NUM_CORES);
+        assert!(core_id < MAX_CORES);
         let entry: &mut PerCoreEntry<T> = &mut self.data[core_id];
         // make sure the entry is not already in use, and claim it
         assert!(entry.is_available.swap(false, Ordering::AcqRel));

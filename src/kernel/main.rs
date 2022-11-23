@@ -42,9 +42,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         info.message().unwrap_or(&format_args!("")),
     );
 
-    loop {
-        aarch64_cpu::asm::wfe();
-    }
+    // Shutdown badly
+    architecture::shutdown(1);
 }
 
 /// Global initialization of the system
@@ -74,6 +73,9 @@ fn per_core_init() -> ! {
     // Must only be called once per core
     call_once_per_core!();
 
+    use core::sync::atomic::{AtomicU8, Ordering::Relaxed};
+    static INITIALIZED_CORES: AtomicU8 = AtomicU8::new(0);
+
     // Make sure this is running in EL1
     assert_eq!(
         architecture::exception_level(),
@@ -85,5 +87,11 @@ fn per_core_init() -> ! {
         architecture::core_id()
     );
 
-    todo!()
+    if INITIALIZED_CORES.fetch_add(1, Relaxed) + 1 == architecture::num_cores() {
+        architecture::shutdown(0);
+    }
+
+    loop {
+        aarch64_cpu::asm::wfe();
+    }
 }

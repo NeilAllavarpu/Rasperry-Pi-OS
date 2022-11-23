@@ -8,6 +8,8 @@ pub use spinlock::*;
 mod config;
 pub use config::*;
 use tock_registers::interfaces::{Readable, Writeable};
+mod shutdown;
+pub use shutdown::*;
 
 use crate::{call_once, PrivilegeLevel, call_once_per_core};
 extern "C" {
@@ -42,4 +44,8 @@ fn el2_init() {
 pub fn init() {
     call_once!();
     config::init();
+}
+
+pub fn num_cores() -> u8 {
+    4
 }
