@@ -1,6 +1,10 @@
 // The boot sequence
 
-use aarch64_cpu::{registers::{CNTFRQ_EL0, MPIDR_EL1, CNTPCT_EL0}, asm::barrier};
+use crate::PrivilegeLevel;
+use aarch64_cpu::{
+    asm::barrier,
+    registers::{CurrentEL, CNTFRQ_EL0, CNTPCT_EL0, MPIDR_EL1},
+};
 use tock_registers::interfaces::Readable;
 
 pub fn core_id() -> u8 {
@@ -18,4 +22,14 @@ pub fn current_tick() -> u64 {
     // Prevent that the counter is read ahead of time due to out-of-order execution.
     barrier::isb(barrier::SY);
     CNTPCT_EL0.get()
+}
+
+/// Exception level
+pub fn exception_level() -> PrivilegeLevel {
+    match CurrentEL.read_as_enum(CurrentEL::EL) {
+        Some(CurrentEL::EL::Value::EL2) => PrivilegeLevel::Hypervisor,
+        Some(CurrentEL::EL::Value::EL1) => PrivilegeLevel::Kernel,
+        Some(CurrentEL::EL::Value::EL0) => PrivilegeLevel::User,
+        _ => PrivilegeLevel::Unknown,
+    }
 }

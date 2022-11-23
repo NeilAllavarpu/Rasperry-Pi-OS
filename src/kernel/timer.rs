@@ -4,6 +4,7 @@ use core::{hint, num::NonZeroU32, ops::Add, time::Duration};
 
 const NANOSEC_PER_SEC: NonZeroU32 = NonZeroU32::new(1000000000).unwrap();
 
+/// Encloses a timer given tick value
 #[derive(PartialEq, PartialOrd)]
 pub struct TimerValue(u64);
 

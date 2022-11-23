@@ -1,6 +1,9 @@
 .section .text._start
 .global _start
 _start:
+    # Disable interrupts
+    msr daifset, #0b1111
+
     # Get start and end of BSS
 	adrp x1, __bss_start
     add x1, x1, #:lo12:__bss_start
@@ -15,7 +18,7 @@ clear_bss:
 
     // Run init sequence
     mov sp, 0x80000
-    b init
+    b el2_init
 
 .global _per_core_init
 _per_core_init:

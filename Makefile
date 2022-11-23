@@ -19,7 +19,7 @@ export LD_SCRIPT_PATH
 
 # Dependencies
 KERNEL_LINKER_SCRIPT = kernel.ld
-KERNEL_ELF      	 ?= target/$(TARGET)/debug/kernel
+KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
 KERNEL_ELF_DEPS = $(shell ls src/**/*)
 
 # Rust + other build things
@@ -32,7 +32,7 @@ RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D warnings                   \
     -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET) $(EXTRA_COMPILER_ARGS)
+COMPILER_ARGS = --target=$(TARGET) --release
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)

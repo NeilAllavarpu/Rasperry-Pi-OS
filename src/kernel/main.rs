@@ -11,13 +11,18 @@ mod architecture;
 #[path = "../board/board.rs"]
 mod board;
 
+mod exception;
+mod macros;
 mod mutex;
-pub use mutex::Mutex;
 mod per_core;
-pub use per_core::PerCore;
 mod print;
 mod serial;
 mod timer;
+
+pub use exception::*;
+pub use mutex::*;
+pub use per_core::*;
+pub use timer::*;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -40,30 +45,38 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 }
 
+/// Global initialization of the system
 #[no_mangle]
 fn init() -> ! {
-    // The main init sequence must only run once, globally
-    #[cfg(debug_assertions)]
-    {
-        use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
-        static IS_FIRST_INIT: AtomicBool = AtomicBool::new(true);
-        assert!(IS_FIRST_INIT.swap(false, AcqRel));
-        println!("*** Init sequence loaded ***");
-    }
+    // Must only be run once
+    call_once!();
+
+    // Make sure this is running in EL1
+    assert_eq!(
+        architecture::exception_level(),
+        exception::PrivilegeLevel::Kernel
+    );
+
+    // Initialize board-specific items
+    board::init();
+
+    println!("What just happened? Why am I here?");
 
     board::wake_all_cores();
-    timer::wait_at_least(core::time::Duration::new(2, 0));
+    wait_at_least(core::time::Duration::new(2, 0));
     per_core_init()
 }
 
+/// Per-core initialization
 #[no_mangle]
 fn per_core_init() -> ! {
-    // The per-core init sequence must only run once per core
-    #[cfg(debug_assertions)]
-    {
-        static IS_FIRST_INIT: PerCore<bool> = PerCore::new(true);
-        assert!(IS_FIRST_INIT.with_current(|is_first| core::mem::replace(is_first, false)));
-        println!("*** Per-core sequence loaded on core {} ***", architecture::core_id());
-    }
+    // Must only be called once per core
+    static IS_FIRST_INIT: PerCore<bool> = PerCore::new(true);
+    assert!(IS_FIRST_INIT.with_current(|is_first| core::mem::replace(is_first, false)));
+    println!(
+        "*** Per-core sequence loaded on core {} ***",
+        architecture::core_id()
+    );
+
     todo!()
 }
