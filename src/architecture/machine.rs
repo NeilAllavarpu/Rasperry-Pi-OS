@@ -3,12 +3,16 @@
 use crate::PrivilegeLevel;
 use aarch64_cpu::{
     asm::barrier,
-    registers::{CurrentEL, CNTFRQ_EL0, CNTPCT_EL0, MPIDR_EL1},
+    registers::{CurrentEL, CNTFRQ_EL0, CNTPCT_EL0, MPIDR_EL1, TPIDR_EL1},
 };
 use tock_registers::interfaces::Readable;
 
 pub fn core_id() -> u8 {
     (MPIDR_EL1.get() & 0b11) as u8
+}
+
+pub fn thread_id() -> u64 {
+    TPIDR_EL1.get()
 }
 
 pub fn timer_frequency() -> core::num::NonZeroU32 {

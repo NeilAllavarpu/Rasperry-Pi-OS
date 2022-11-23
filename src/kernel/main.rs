@@ -59,7 +59,8 @@ fn init() -> ! {
         // Initialize board-specific items
         board::init();
 
-        println!("What just happened? Why am I here?");
+        log!("What just happened? Why am I here?");
+        architecture::CONFIG.get().log();
 
         board::wake_all_cores();
     }
@@ -80,11 +81,6 @@ fn per_core_init() -> ! {
     assert_eq!(
         architecture::exception_level(),
         exception::PrivilegeLevel::Kernel
-    );
-
-    println!(
-        "What just happened? Why is {} here?",
-        architecture::core_id()
     );
 
     if INITIALIZED_CORES.fetch_add(1, Relaxed) + 1 == architecture::num_cores() {
