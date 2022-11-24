@@ -43,7 +43,7 @@ impl<T: Copy> PerCoreInner<T> {
     /// Prevents the current execution from being switched to another core
     /// while using the core's value
     pub fn with_current<'a, R>(&'a mut self, f: impl FnOnce(&'a mut T) -> R) -> R {
-        let core_id: usize = crate::architecture::core_id() as usize;
+        let core_id: usize = crate::architecture::machine::core_id() as usize;
         assert!(core_id < MAX_CORES);
         let entry: &mut PerCoreEntry<T> = &mut self.data[core_id];
         // make sure the entry is not already in use, and claim it

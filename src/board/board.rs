@@ -1,5 +1,5 @@
-pub mod uart;
-pub use uart as serial;
+mod uart;
+pub use uart::serial;
 
 use crate::call_once;
 
@@ -8,6 +8,7 @@ extern "C" {
     fn _per_core_init() -> !;
 }
 
+#[allow(dead_code)]
 pub fn wake_all_cores() -> () {
     // Not invalid, but we shouldn't be trying to call this multiple times
     call_once!();
@@ -24,5 +25,5 @@ pub fn wake_all_cores() -> () {
 pub fn init() -> () {
     // Must only be initialized once
     call_once!();
-    // Nothing to initialize yet...
+    serial().init();
 }

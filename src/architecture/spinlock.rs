@@ -1,6 +1,8 @@
 use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::architecture::exception::ExceptionMasks;
+
 /// A spinlock mutex
 pub struct Spinlock<T> {
     inner: UnsafeCell<T>,
@@ -23,16 +25,26 @@ impl<T> crate::Mutex for Spinlock<T> {
     type State = T;
 
     fn lock<'a, R>(&'a self, f: impl FnOnce(&'a mut Self::State) -> R) -> R {
+        use super::exception;
         use aarch64_cpu::asm::{sev, wfe};
+        let mut state: ExceptionMasks = unsafe { exception::disable() };
         while self.is_locked.swap(true, Ordering::AcqRel) {
-            core::hint::spin_loop();
+            unsafe {
+                exception::restore(state);
+            }
+
             wfe();
+
+            state = unsafe { exception::disable() };
         }
 
         let result: R = f(unsafe { &mut *self.inner.get() });
 
         self.is_locked.store(false, Ordering::Release);
         sev();
+        unsafe {
+            exception::restore(state);
+         }
         result
     }
 }

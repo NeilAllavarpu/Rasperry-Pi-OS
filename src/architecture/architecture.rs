@@ -1,33 +1,48 @@
 // Architecture-specific (ARM) code
 mod boot;
-mod machine;
-use aarch64_cpu::{registers::{HCR_EL2, SPSR_EL2, ELR_EL2, SP_EL1, SP}, asm::eret};
-pub use machine::*;
-mod spinlock;
-pub use spinlock::*;
 mod config;
-pub use config::*;
-use tock_registers::interfaces::{Readable, Writeable};
+pub mod exception;
+pub mod machine;
 mod shutdown;
-pub use shutdown::*;
+mod spinlock;
+pub mod timer;
 
-use crate::{call_once, PrivilegeLevel, call_once_per_core};
-extern "C" {
-    fn _start();
-}
+pub use config::CONFIG;
+pub use shutdown::shutdown;
+pub use spinlock::Spinlock;
 
-/// Switches the core from EL2 to EL1
-/// Switches to the given stack pointer
-/// Jumps to the main init sequence
+/// Switches the core from EL2 to EL1\
+/// Switches to the given stack pointer\
+/// Jumps to the main init sequence\
 #[no_mangle]
 fn el2_init() {
+    use crate::{call_once_per_core, exception::PrivilegeLevel};
+    use aarch64_cpu::{
+        asm::eret,
+        registers::{CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, HCR_EL2, SP, SPSR_EL2, SP_EL1},
+    };
+    use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
     call_once_per_core!();
     // Make sure this is running in EL2
-    assert_eq!(exception_level(), PrivilegeLevel::Hypervisor);
+    assert_eq!(
+        exception::exception_level(),
+        PrivilegeLevel::Hypervisor,
+        "The boot sequence must be running in EL2"
+    );
     // Enable 64 bit mode for EL1
-    HCR_EL2.write(HCR_EL2::RW::EL1IsAarch64);
+    // Prevent exceptions from going to EL2
+    HCR_EL2.modify(
+        HCR_EL2::RW::EL1IsAarch64
+            + HCR_EL2::TGE::DisableTrapGeneralExceptionsToEl2
+            + HCR_EL2::E2H::DisableOsAtEl2,
+    );
+
     // Disable interrupts in EL1 mode, and switch the stack pointer on a per-exception level basis
-    SPSR_EL2.write(
+
+    // why do i need to manually do dis :()
+    CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
+    CNTVOFF_EL2.set(0);
+    SPSR_EL2.modify(
         SPSR_EL2::D::Masked
             + SPSR_EL2::A::Masked
             + SPSR_EL2::I::Masked
@@ -42,10 +57,12 @@ fn el2_init() {
 }
 
 pub fn init() {
-    call_once!();
+    crate::call_once!();
+    exception::init();
     config::init();
 }
 
-pub fn num_cores() -> u8 {
-    4
+pub fn per_core_init() {
+    crate::call_once_per_core!();
+    exception::per_core_init();
 }

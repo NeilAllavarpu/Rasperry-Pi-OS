@@ -39,10 +39,10 @@ unsafe impl<T> Send for SetOnce<T> {}
 #[macro_export]
 macro_rules! call_once {
     () => {{
-        use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
-        static IS_FIRST_INVOCATION: AtomicBool = AtomicBool::new(true);
-        assert!(IS_FIRST_INVOCATION.swap(false, AcqRel))
-    }};
+            use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
+            static IS_FIRST_INVOCATION: AtomicBool = AtomicBool::new(false);
+            assert!(!IS_FIRST_INVOCATION.swap(true, AcqRel))
+        }};
 }
 
 /// Ensures that the given function is only called once per core

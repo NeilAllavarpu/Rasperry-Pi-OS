@@ -1,5 +1,6 @@
 pub fn _print(args: core::fmt::Arguments) {
-    crate::serial::get().write_format_string(args);
+    use crate::{board::serial, Serial};
+    serial().write_fmt(args);
 }
 
 /// Print to serial output
@@ -23,23 +24,22 @@ macro_rules! println {
 macro_rules! log {
     ($string:expr) => ({
         use core::time::Duration;
-        let timestamp: Duration = crate::now().into();
-
+        let timestamp: Duration = crate::timer::now();
 
         $crate::print::_print(format_args_nl!(
             concat!("[TH {:2}, {}.{:03}s] ", $string),
-            crate::architecture::thread_id(),
+            crate::architecture::machine::thread_id(),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
         ));
     });
     ($format_string:expr, $($arg:tt)*) => ({
         use core::time::Duration;
-        let timestamp: Duration = crate::now().into();
+        let timestamp: Duration = crate::timer::now();
 
         $crate::print::_print(format_args_nl!(
             concat!("[TH {:2}, {}.{:03}s] ", $format_string),
-            crate::architecture::thread_id(),
+            crate::architecture::machine::thread_id(),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
             $($arg)*

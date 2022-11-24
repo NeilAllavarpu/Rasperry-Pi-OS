@@ -1,5 +1,4 @@
 #[derive(PartialEq, Debug)]
-
 /// Represents the privilege level of some execution context
 pub enum PrivilegeLevel {
     /// Lowest privilege mode

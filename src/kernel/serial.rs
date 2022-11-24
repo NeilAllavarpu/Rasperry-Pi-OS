@@ -1,9 +1,8 @@
 /// A serial output
-pub trait Write {
+pub trait Serial {
     /// Writes a format string
-    fn write_format_string(&self, bytes: core::fmt::Arguments);
-}
+    fn write_fmt(&self, bytes: core::fmt::Arguments) -> ();
 
-pub fn get() -> &'static dyn Write {
-    crate::board::serial::get()
+    /// Attempt to read a byte as input
+    fn read_byte(&self) -> Option<u8>;
 }

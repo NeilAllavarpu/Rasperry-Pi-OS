@@ -2,7 +2,7 @@
 .global _start
 _start:
     # Disable interrupts
-    msr daifset, #0b1111
+    msr DAIFSET, #0b1111
 
     # Get start and end of BSS
 	adrp x0, __bss_start
@@ -22,10 +22,10 @@ _start:
 .global _per_core_init
 _per_core_init:
     # Disable interrupts
-    msr daifset, #0b1111
+    msr DAIFSET, #0b1111
 
     # Get core ID
-    mrs	x0, mpidr_el1
+    mrs	x0, MPIDR_EL1
 	and	x0, x0, #0b11
 
     # Pick an appropriate stack pointer

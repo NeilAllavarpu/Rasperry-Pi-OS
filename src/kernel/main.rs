@@ -6,6 +6,7 @@
 #![feature(panic_info_message)]
 #![feature(const_option)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
 
 #[path = "../architecture/architecture.rs"]
 mod architecture;
@@ -20,11 +21,12 @@ mod print;
 mod serial;
 mod timer;
 
-pub use exception::*;
-pub use mutex::*;
+use core::time::Duration;
+
+pub use mutex::Mutex;
 pub use once::*;
-pub use per_core::*;
-pub use timer::*;
+pub use per_core::PerCore;
+pub use serial::Serial;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
@@ -33,9 +35,9 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         _ => ("Unknown file", 0, 0),
     };
 
-    println!(
-        "*** PANIC on core {} (at {}:{}:{}):\n  {}",
-        architecture::core_id(),
+    log!(
+        "PANIC on core {} (at {}:{}:{})\n{}",
+        architecture::machine::core_id(),
         file,
         line,
         column,
@@ -49,7 +51,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 /// Global initialization of the system
 #[no_mangle]
 fn init() -> ! {
-    if architecture::core_id() == 0 {
+    if architecture::machine::core_id() == 0 {
         // This is the global initialization sequence; it should only run once
         call_once!();
 
@@ -74,20 +76,21 @@ fn per_core_init() -> ! {
     // Must only be called once per core
     call_once_per_core!();
 
-    use core::sync::atomic::{AtomicU8, Ordering::Relaxed};
-    static INITIALIZED_CORES: AtomicU8 = AtomicU8::new(0);
+    // Temporarily set thread ID to match core ID, for logs
+    architecture::machine::set_thread_id(architecture::machine::core_id() as u64);
 
     // Make sure this is running in EL1
     assert_eq!(
-        architecture::exception_level(),
-        exception::PrivilegeLevel::Kernel
+        architecture::exception::exception_level(),
+        exception::PrivilegeLevel::Kernel,
+        "The kernel must be running with kernel privileges"
     );
 
-    if INITIALIZED_CORES.fetch_add(1, Relaxed) + 1 == architecture::num_cores() {
-        architecture::shutdown(0);
-    }
+    architecture::per_core_init();
 
-    loop {
-        aarch64_cpu::asm::wfe();
-    }
+    log!("Enabling interrupts, I'm scared...");
+    architecture::exception::enable();
+
+    timer::wait_at_least(Duration::from_secs(1));
+    architecture::shutdown(0);
 }

@@ -59,7 +59,7 @@ pub struct Config {
 
 use MIDR_EL1::{Architecture, Implementer};
 
-use super::timer_frequency;
+use super::timer::timer_frequency;
 impl Config {
     /// Discovers configuration of the system
     pub fn create() -> Self {
