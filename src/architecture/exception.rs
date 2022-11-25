@@ -1,4 +1,4 @@
-use crate::{call_once_per_core, exception::PrivilegeLevel};
+use crate::{call_once_per_core, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::barrier,
     registers::{CurrentEL, DAIF, ESR_EL1, SCTLR_EL1, SPSR_EL1, VBAR_EL1},

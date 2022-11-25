@@ -1,56 +1,9 @@
-//! The initialization sequences
-
-#![no_main]
-#![no_std]
-#![feature(format_args_nl)]
-#![feature(panic_info_message)]
-#![feature(const_option)]
-#![feature(once_cell)]
-#![feature(result_option_inspect)]
-
-#[path = "../architecture/architecture.rs"]
-mod architecture;
-#[path = "../board/board.rs"]
-mod board;
-
-mod exception;
-mod mutex;
-mod once;
-mod per_core;
-mod print;
-mod serial;
-mod timer;
-
+use crate::{architecture, board, call_once, call_once_per_core, kernel, log};
 use core::time::Duration;
-
-pub use mutex::Mutex;
-pub use once::*;
-pub use per_core::PerCore;
-pub use serial::Serial;
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    let (file, line, column) = match info.location() {
-        Some(loc) => (loc.file(), loc.line(), loc.column()),
-        _ => ("Unknown file", 0, 0),
-    };
-
-    log!(
-        "PANIC on core {} (at {}:{}:{})\n{}",
-        architecture::machine::core_id(),
-        file,
-        line,
-        column,
-        info.message().unwrap_or(&format_args!("")),
-    );
-
-    // Shutdown badly
-    architecture::shutdown(1);
-}
 
 /// Global initialization of the system
 #[no_mangle]
-fn init() -> ! {
+pub fn init() -> ! {
     if architecture::machine::core_id() == 0 {
         // This is the global initialization sequence; it should only run once
         call_once!();
@@ -82,7 +35,7 @@ fn per_core_init() -> ! {
     // Make sure this is running in EL1
     assert_eq!(
         architecture::exception::exception_level(),
-        exception::PrivilegeLevel::Kernel,
+        kernel::exception::PrivilegeLevel::Kernel,
         "The kernel must be running with kernel privileges"
     );
 
@@ -91,6 +44,6 @@ fn per_core_init() -> ! {
     log!("Enabling interrupts, I'm scared...");
     architecture::exception::enable();
 
-    timer::wait_at_least(Duration::from_secs(1));
+    kernel::timer::wait_at_least(Duration::from_secs(1));
     architecture::shutdown(0);
 }

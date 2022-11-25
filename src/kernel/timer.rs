@@ -1,5 +1,5 @@
 /// Timer support
-use crate::architecture::timer;
+use crate::architecture;
 use core::{hint, num::NonZeroU32, ops::Add, time::Duration};
 
 const NANOSEC_PER_SEC: NonZeroU32 = NonZeroU32::new(1000000000).unwrap();
@@ -30,7 +30,7 @@ impl Add for TimerValue {
 impl From<TimerValue> for Duration {
     fn from(timer_value: TimerValue) -> Self {
         let nanoseconds: u128 = (timer_value.ticks() as u128) * (NANOSEC_PER_SEC.get() as u128)
-            / (timer::timer_frequency().get() as u128);
+            / (architecture::timer::timer_frequency().get() as u128);
 
         Self::new(
             (nanoseconds / (NANOSEC_PER_SEC.get() as u128))
@@ -51,7 +51,7 @@ impl TryFrom<Duration> for TimerValue {
             return Err("Duration is too large to represent with the given timer");
         }
 
-        let counter_value: u128 = duration.as_nanos() * (timer::timer_frequency().get() as u128)
+        let counter_value: u128 = duration.as_nanos() * (architecture::timer::timer_frequency().get() as u128)
             / (NANOSEC_PER_SEC.get() as u128);
 
         Ok(Self(counter_value as u64))
@@ -60,7 +60,7 @@ impl TryFrom<Duration> for TimerValue {
 
 /// Returns the current timestamp
 pub fn now() -> Duration {
-    Duration::from(timer::current_tick())
+    Duration::from(architecture::timer::current_tick())
 }
 
 /// Pauses execution for at least the given duration, up to rounding errors

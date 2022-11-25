@@ -1,7 +1,7 @@
-use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use crate::architecture::exception::ExceptionMasks;
+use core::{
+    cell::UnsafeCell,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// A spinlock mutex
 pub struct Spinlock<T> {
@@ -21,13 +21,13 @@ impl<T> Spinlock<T> {
 unsafe impl<T> Send for Spinlock<T> {}
 unsafe impl<T> Sync for Spinlock<T> {}
 
-impl<T> crate::Mutex for Spinlock<T> {
+impl<T> crate::kernel::Mutex for Spinlock<T> {
     type State = T;
 
     fn lock<'a, R>(&'a self, f: impl FnOnce(&'a mut Self::State) -> R) -> R {
-        use super::exception;
+        use crate::architecture::exception;
         use aarch64_cpu::asm::{sev, wfe};
-        let mut state: ExceptionMasks = unsafe { exception::disable() };
+        let mut state: exception::ExceptionMasks = unsafe { exception::disable() };
         while self.is_locked.swap(true, Ordering::AcqRel) {
             unsafe {
                 exception::restore(state);
@@ -44,7 +44,7 @@ impl<T> crate::Mutex for Spinlock<T> {
         sev();
         unsafe {
             exception::restore(state);
-         }
+        }
         result
     }
 }

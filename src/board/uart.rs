@@ -1,4 +1,4 @@
-use crate::{architecture::Spinlock, call_once, serial, Mutex};
+use crate::{architecture::Spinlock, call_once, kernel, kernel::Mutex};
 use core::{
     fmt::{self, Write},
     marker::PhantomData,
@@ -105,7 +105,7 @@ impl UART {
     }
 }
 
-impl serial::Serial for UART {
+impl kernel::Serial for UART {
     fn write_fmt(&self, args: core::fmt::Arguments) -> () {
         _ = self.inner.lock(|inner| inner.write_fmt(args))
     }

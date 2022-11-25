@@ -1,4 +1,4 @@
-use crate::{call_once, log, SetOnce};
+use crate::{architecture, kernel, call_once, log};
 use aarch64_cpu::registers::{MIDR_EL1, MPIDR_EL1};
 use core::num::NonZeroU32;
 use tock_registers::interfaces::Readable;
@@ -59,7 +59,6 @@ pub struct Config {
 
 use MIDR_EL1::{Architecture, Implementer};
 
-use super::timer::timer_frequency;
 impl Config {
     /// Discovers configuration of the system
     pub fn create() -> Self {
@@ -120,7 +119,7 @@ impl Config {
                     MIDR_EL1.read(MIDR_EL1::Revision) as u8,
                 ),
             ),
-            timer_frequency: ConfigEntry::new("Timer frequency (Hz)", timer_frequency()),
+            timer_frequency: ConfigEntry::new("Timer frequency (Hz)", architecture::timer::timer_frequency()),
         }
     }
 
@@ -147,7 +146,7 @@ impl Config {
 unsafe impl Sync for Config {}
 unsafe impl Send for Config {}
 
-pub static CONFIG: SetOnce<Config> = SetOnce::new();
+pub static CONFIG: kernel::SetOnce<Config> = kernel::SetOnce::new();
 
 /// Initializes the configuration
 pub fn init() {
