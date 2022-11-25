@@ -8,6 +8,9 @@ pub fn init() -> ! {
         // This is the global initialization sequence; it should only run once
         call_once!();
 
+        // Create the heap
+        kernel::heap::init();
+
         // Initialize architecture-specific items
         architecture::init();
 
