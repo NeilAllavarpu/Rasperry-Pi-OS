@@ -8,6 +8,7 @@ mod per_core;
 pub mod print;
 pub mod serial;
 mod stack;
+pub mod thread;
 pub mod timer;
 
 pub use init::init;

@@ -1,7 +1,6 @@
 use crate::{architecture::Spinlock, call_once, kernel, kernel::Mutex};
 use core::{
     fmt::{self, Write},
-    marker::PhantomData,
     ops,
 };
 use tock_registers::{
@@ -18,17 +17,13 @@ register_structs! {
 }
 
 pub struct MMIO<T> {
-    start_addr: usize,
-    phantom: PhantomData<T>,
+    start_addr: *mut T,
 }
 
 impl<T> MMIO<T> {
     /// Create an instance.
-    pub const unsafe fn new(start_addr: usize) -> Self {
-        Self {
-            start_addr,
-            phantom: PhantomData,
-        }
+    pub const unsafe fn new(start_addr: *mut T) -> Self {
+        Self { start_addr }
     }
 }
 
@@ -36,7 +31,7 @@ impl<T> ops::Deref for MMIO<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.start_addr as *const _) }
+        unsafe { &*self.start_addr }
     }
 }
 
@@ -56,9 +51,9 @@ impl UARTInner {
     ///
     /// **SAFETY**: The start address must be correct, and the range must not be used by anything else.
     /// This includes not initializing the UART multiple times
-    pub const unsafe fn new(mmio_start_addr: usize) -> Self {
+    pub const unsafe fn new(mmio_start_addr: *mut RegisterBlock) -> Self {
         Self {
-            registers: Registers::new(mmio_start_addr),
+            registers: unsafe { Registers::new(mmio_start_addr) },
         }
     }
 
@@ -67,13 +62,13 @@ impl UARTInner {
     /// Sends a byte across the UART
     fn write_byte(&mut self, c: u8) {
         // Write the character to the buffer.
-        self.registers.DR.set(c as u32);
+        self.registers.DR.set(c.into());
     }
 
     /// Reads a byte from the UART, if available
     fn read_byte(&mut self) -> Option<u8> {
         // Read one character.
-        Some(self.registers.DR.get() as u8)
+        Some(self.registers.DR.get().try_into().unwrap())
     }
 }
 
@@ -92,9 +87,9 @@ impl UART {
     ///
     /// **SAFETY**: The start address must be correct, and the range must not be used by anything else.
     /// This includes not initializing the UART multiple times
-    pub const unsafe fn new(start_address: usize) -> Self {
+    pub const unsafe fn new(start_address: *mut RegisterBlock) -> Self {
         Self {
-            inner: Spinlock::new(UARTInner::new(start_address)),
+            inner: Spinlock::new(unsafe { UARTInner::new(start_address) }),
         }
     }
 
@@ -116,7 +111,7 @@ impl kernel::Serial for UART {
 }
 
 /// The system-wide UART
-static UART: UART = unsafe { UART::new(0x3F201000) };
+static UART: UART = unsafe { UART::new(0x3F201000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection
 pub fn serial() -> &'static UART {

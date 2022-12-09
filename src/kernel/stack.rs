@@ -27,7 +27,7 @@ impl<T: Stackable> Stack<T> {
     pub unsafe fn push(&self, value: &mut T) -> () {
         let mut top_ptr = self.top.load(Ordering::Relaxed);
         loop {
-            value.set_next(top_ptr);
+            unsafe { value.set_next(top_ptr) }
             let previous_top = self.top.compare_exchange_weak(
                 top_ptr,
                 value,
@@ -55,7 +55,7 @@ impl<T: Stackable> Stack<T> {
                 // Assumption: Since `top_ptr` is not null,
                 // this must point to a valid T
                 // as pushed into the stack by `push`
-                (*top_ptr).read_next(),
+                unsafe { (*top_ptr).read_next() },
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             );
@@ -74,7 +74,7 @@ impl<T: Stackable> Stack<T> {
         let mut depth: usize = 0;
         while !ptr.is_null() {
             depth += 1;
-            ptr = (*ptr).read_next()
+            ptr = unsafe { (*ptr).read_next() }
         }
         depth
     }
@@ -100,6 +100,6 @@ impl<T: Stackable> BoxStack<T> {
     }
 
     pub unsafe fn depth(&self) -> usize {
-        self.0.depth()
+        unsafe { self.0.depth() }
     }
 }

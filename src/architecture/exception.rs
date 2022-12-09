@@ -1,46 +1,12 @@
 use crate::{call_once_per_core, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::barrier,
-    registers::{CurrentEL, DAIF, ESR_EL1, SCTLR_EL1, SPSR_EL1, VBAR_EL1},
+    registers::{CurrentEL, DAIF, SCTLR_EL1, VBAR_EL1},
 };
-use tock_registers::{
-    interfaces::{ReadWriteable, Readable, Writeable},
-    registers::InMemoryRegister,
-};
-
-/// Wrapper structs for memory copies of registers.
-#[repr(transparent)]
-pub struct SpsrEL1(InMemoryRegister<u64, SPSR_EL1::Register>);
-pub struct EsrEL1(InMemoryRegister<u64, ESR_EL1::Register>);
-
-#[repr(C)]
-pub struct ExceptionContext {
-    /// General purpose registers.
-    pub gpr: [u64; 30],
-
-    /// Link register
-    pub lr: u64,
-
-    /// Exception link register
-    pub elr_el1: u64,
-
-    /// Saved program status
-    pub spsr_el1: SpsrEL1,
-
-    /// Exception syndrome register
-    pub esr_el1: EsrEL1,
-}
-
-impl ExceptionContext {}
+use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 // The exception assembly
 core::arch::global_asm!(include_str!("exception.s"));
-
-/// Default exception handler
-#[no_mangle]
-extern "C" fn unhandled_exception(_context: &ExceptionContext) {
-    panic!("Unhandled exception!\n");
-}
 
 /// Exception level
 pub fn exception_level() -> PrivilegeLevel {
@@ -61,7 +27,7 @@ pub fn per_core_init() -> () {
         static _exception_vector: core::cell::UnsafeCell<()>;
     }
 
-    VBAR_EL1.set(unsafe { _exception_vector.get() as u64 });
+    VBAR_EL1.set(unsafe { _exception_vector.get().to_bits().try_into().unwrap() });
 
     // Force VBAR update to complete before next instruction.
     barrier::isb(barrier::SY);

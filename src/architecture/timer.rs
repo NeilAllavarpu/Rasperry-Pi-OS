@@ -3,13 +3,12 @@ use aarch64_cpu::{
     asm::barrier,
     registers::{CNTFRQ_EL0, CNTPCT_EL0},
 };
+use core::num::NonZeroU32;
 use tock_registers::interfaces::Readable;
 
-pub fn timer_frequency() -> core::num::NonZeroU32 {
+pub fn timer_frequency() -> NonZeroU32 {
     // The upper 32 bits are reserved to 0
-    (CNTFRQ_EL0.get() as u32)
-        .try_into()
-        .expect("The clock frequency should be nonzero")
+    u32::try_from(CNTFRQ_EL0.get()).unwrap().try_into().unwrap()
 }
 
 pub fn current_tick() -> TimerValue {

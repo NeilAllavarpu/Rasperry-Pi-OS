@@ -1,4 +1,4 @@
-use crate::{architecture, kernel, call_once, log};
+use crate::{architecture, call_once, kernel, log};
 use aarch64_cpu::registers::{MIDR_EL1, MPIDR_EL1};
 use core::num::NonZeroU32;
 use tock_registers::interfaces::Readable;
@@ -114,12 +114,21 @@ impl Config {
             product_info: ConfigEntry::new(
                 "Device variant/version",
                 (
-                    MIDR_EL1.read(MIDR_EL1::Variant) as u8,
-                    MIDR_EL1.read(MIDR_EL1::PartNum) as u8,
-                    MIDR_EL1.read(MIDR_EL1::Revision) as u8,
+                    (MIDR_EL1.read(MIDR_EL1::Variant) & 0xFF)
+                        .try_into()
+                        .unwrap(),
+                    (MIDR_EL1.read(MIDR_EL1::PartNum) & 0xFF)
+                        .try_into()
+                        .unwrap(),
+                    (MIDR_EL1.read(MIDR_EL1::Revision) & 0xFF)
+                        .try_into()
+                        .unwrap(),
                 ),
             ),
-            timer_frequency: ConfigEntry::new("Timer frequency (Hz)", architecture::timer::timer_frequency()),
+            timer_frequency: ConfigEntry::new(
+                "Timer frequency (Hz)",
+                architecture::timer::timer_frequency(),
+            ),
         }
     }
 

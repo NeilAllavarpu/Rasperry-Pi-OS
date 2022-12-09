@@ -1,9 +1,8 @@
 use crate::{architecture, board, call_once, call_once_per_core, kernel, log};
-use core::time::Duration;
 
 /// Global initialization of the system
 #[no_mangle]
-pub fn init() -> ! {
+pub extern "C" fn init() -> ! {
     if architecture::machine::core_id() == 0 {
         // This is the global initialization sequence; it should only run once
         call_once!();
@@ -19,6 +18,11 @@ pub fn init() -> ! {
 
         log!("What just happened? Why am I here?");
         architecture::CONFIG.get().log();
+        kernel::thread::init();
+
+        kernel::thread::schedule(kernel::thread::TCB::new(|| {
+            log!("Running the kernel now");
+        }));
 
         board::wake_all_cores();
     }
@@ -27,13 +31,9 @@ pub fn init() -> ! {
 }
 
 /// Per-core initialization
-#[no_mangle]
 fn per_core_init() -> ! {
     // Must only be called once per core
     call_once_per_core!();
-
-    // Temporarily set thread ID to match core ID, for logs
-    architecture::machine::set_thread_id(architecture::machine::core_id() as u64);
 
     // Make sure this is running in EL1
     assert_eq!(
@@ -43,10 +43,11 @@ fn per_core_init() -> ! {
     );
 
     architecture::per_core_init();
+    kernel::thread::per_core_init();
 
     log!("Enabling interrupts, I'm scared...");
     architecture::exception::enable();
 
-    kernel::timer::wait_at_least(Duration::from_secs(1));
-    architecture::shutdown(0);
+    kernel::thread::idle_loop();
+    unreachable!();
 }

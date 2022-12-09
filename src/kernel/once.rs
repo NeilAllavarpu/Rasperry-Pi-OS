@@ -31,18 +31,18 @@ impl<T> SetOnce<T> {
     }
 }
 
-unsafe impl<T> Sync for SetOnce<T> {}
-unsafe impl<T> Send for SetOnce<T> {}
+unsafe impl<T: Sync> Sync for SetOnce<T> {}
+unsafe impl<T: Send> Send for SetOnce<T> {}
 
 /// Ensures that the given function is only called once
 /// Panics if run more than once
 #[macro_export]
 macro_rules! call_once {
     () => {{
-            use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
-            static IS_FIRST_INVOCATION: AtomicBool = AtomicBool::new(false);
-            assert!(!IS_FIRST_INVOCATION.swap(true, AcqRel))
-        }};
+        use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
+        static IS_FIRST_INVOCATION: AtomicBool = AtomicBool::new(false);
+        assert!(!IS_FIRST_INVOCATION.swap(true, AcqRel))
+    }};
 }
 
 /// Ensures that the given function is only called once per core

@@ -6,7 +6,7 @@ use core::{
     cmp::{max, min},
 };
 
-const HEAP_START: usize = 0x200000;
+const HEAP_START: *mut () = 0x200000 as *mut ();
 const HEAP_SIZE: usize = 0x200000;
 
 struct FreeBlock(*mut FreeBlock);
@@ -38,32 +38,37 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         if layout.size() > BLOCK_SIZE {
             return None;
         }
-        let block = self.first_free.pop();
+        let block = unsafe { self.first_free.pop() };
         if block.is_none() {
             // For now, simply warn if the heap is out of memory
             log!("Out of heap space!")
         }
-        block.map(|block| block as *mut FreeBlock as *mut u8)
+        block.map(|block| (block as *mut FreeBlock).cast())
     }
 
     unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) -> () {
-        self.first_free.push(&mut *(ptr as *mut FreeBlock));
+        unsafe {
+            self.first_free
+                .push(ptr.cast::<FreeBlock>().as_mut().unwrap())
+        }
     }
 
     /// **SAFETY**: The range of memory given must be appropriate
-    unsafe fn init(&mut self, start: usize, size: usize) {
+    unsafe fn init(&mut self, start: *mut (), size: usize) {
         assert!(BLOCK_SIZE.is_power_of_two());
 
         for block_offset in (0..size).step_by(BLOCK_SIZE) {
-            self.first_free
-                .push(&mut *((start + block_offset) as *mut FreeBlock))
+            unsafe {
+                self.first_free
+                    .push(&mut *start.byte_add(block_offset).cast())
+            }
         }
 
         self.size = size
     }
 
     unsafe fn log(&self) {
-        let blocks_free = self.first_free.depth();
+        let blocks_free = unsafe { self.first_free.depth() };
         log!(
             "HEAP BLOCKS {}B: {} Free blocks, {} In-use blocks",
             BLOCK_SIZE,
@@ -92,14 +97,18 @@ impl HeapAllocator {
     fn init(&self) -> () {
         call_once!();
         unsafe { (*self.b512.get()).init(HEAP_START, HEAP_SIZE * 3 / 4) }
-        unsafe { (*self.b128.get()).init(HEAP_START + HEAP_SIZE * 3 / 4, HEAP_SIZE * 3 / 16) }
-        unsafe { (*self.b32.get()).init(HEAP_START + HEAP_SIZE * 15 / 16, HEAP_SIZE / 16) }
+        unsafe {
+            (*self.b128.get()).init(HEAP_START.byte_add(HEAP_SIZE * 3 / 4), HEAP_SIZE * 3 / 16)
+        }
+        unsafe { (*self.b32.get()).init(HEAP_START.byte_add(HEAP_SIZE * 15 / 16), HEAP_SIZE / 16) }
     }
 
     unsafe fn log(&self) -> () {
-        (*self.b512.get()).log();
-        (*self.b128.get()).log();
-        (*self.b32.get()).log();
+        unsafe {
+            (*self.b512.get()).log();
+            (*self.b128.get()).log();
+            (*self.b32.get()).log();
+        }
     }
 }
 
@@ -109,30 +118,24 @@ static mut KERNEL_HEAP: HeapAllocator = HeapAllocator::new();
 unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         match max(layout.align(), layout.size()) {
-            0..=32 => KERNEL_HEAP
-                .b32
-                .get_mut()
-                .alloc(layout)
-                .unwrap_or(core::ptr::null_mut()),
-            0..=128 => KERNEL_HEAP
-                .b128
-                .get_mut()
-                .alloc(layout)
-                .unwrap_or(core::ptr::null_mut()),
-            0..=512 => KERNEL_HEAP
-                .b512
-                .get_mut()
-                .alloc(layout)
-                .unwrap_or(core::ptr::null_mut()),
+            0..=32 => {
+                unsafe { KERNEL_HEAP.b32.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+            }
+            0..=128 => {
+                unsafe { KERNEL_HEAP.b128.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+            }
+            0..=512 => {
+                unsafe { KERNEL_HEAP.b512.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+            }
             _ => core::ptr::null_mut(),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) -> () {
         match max(layout.align(), layout.size()) {
-            0..=32 => KERNEL_HEAP.b32.get_mut().dealloc(ptr, layout),
-            0..=128 => KERNEL_HEAP.b128.get_mut().dealloc(ptr, layout),
-            0..=512 => KERNEL_HEAP.b512.get_mut().dealloc(ptr, layout),
+            0..=32 => unsafe { KERNEL_HEAP.b32.get_mut().dealloc(ptr, layout) },
+            0..=128 => unsafe { KERNEL_HEAP.b128.get_mut().dealloc(ptr, layout) },
+            0..=512 => unsafe { KERNEL_HEAP.b512.get_mut().dealloc(ptr, layout) },
             _ => (),
         }
     }
@@ -143,14 +146,12 @@ unsafe impl GlobalAlloc for HeapAllocator {
         let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
         let old_size = max(layout.size(), layout.size());
         let new_size = max(new_layout.size(), new_layout.size());
-        log!("realloced {} -> {}", old_size, new_size);
         let old_p2 = old_size.next_power_of_two();
         let new_p2 = new_size.next_power_of_two();
         if (old_p2 <= 32 && new_p2 <= 32)
             || (32 < old_p2 && old_p2 <= 128 && 32 < new_p2 && new_p2 <= 128)
             || (128 < old_p2 && old_p2 <= 512 && 128 < new_p2 && new_p2 <= 512)
         {
-            log!("optimized!");
             // Fits in the same block, no need to reallocate
             return ptr;
         }
@@ -171,7 +172,7 @@ unsafe impl GlobalAlloc for HeapAllocator {
 }
 
 pub unsafe fn log_allocator() {
-    KERNEL_HEAP.log()
+    unsafe { KERNEL_HEAP.log() }
 }
 
 pub fn init() -> () {

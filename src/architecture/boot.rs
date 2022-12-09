@@ -5,7 +5,7 @@ core::arch::global_asm!(include_str!("boot.s"));
 /// Switches to the given stack pointer\
 /// Jumps to the main init sequence\
 #[no_mangle]
-fn el2_init() {
+extern "C" fn el2_init() -> ! {
     use crate::{architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
     use aarch64_cpu::{
         asm::eret,
@@ -41,7 +41,12 @@ fn el2_init() {
             + SPSR_EL2::M::EL1h,
     );
     // Begin execution with the main init sequence
-    ELR_EL2.set(crate::kernel::init as *const () as u64);
+    ELR_EL2.set(
+        (crate::kernel::init as *const ())
+            .to_bits()
+            .try_into()
+            .unwrap(),
+    );
     // Set the stack pointer when execution resumes
     SP_EL1.set(SP.get());
     eret();

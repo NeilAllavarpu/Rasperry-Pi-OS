@@ -41,42 +41,41 @@
 .endm
 .section .text
 // Alignment for VBAR
-.align 11
+.balign 0x800
 .global _exception_vector
 _exception_vector:
-.org 0x000
-    EXCEPTION_HANDLER unhandled_exception
-.org 0x080
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x100
-    EXCEPTION_HANDLER unhandled_exception
-.org 0x180
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x200
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x280
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x300
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x380
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x400
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x480
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x500
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x580
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x600
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x680
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x700
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x780
-	EXCEPTION_HANDLER unhandled_exception
-.org 0x800
+.balign 0x80
+    EXCEPTION_HANDLER curr_el0_sync
+.balign 0x80
+	EXCEPTION_HANDLER curr_el0_irq
+.balign 0x80
+    EXCEPTION_HANDLER curr_el0_fiq
+.balign 0x80
+	EXCEPTION_HANDLER curr_el0_other
+.balign 0x80
+	EXCEPTION_HANDLER curr_elx_sync
+.balign 0x80
+	EXCEPTION_HANDLER curr_elx_irq
+.balign 0x80
+	EXCEPTION_HANDLER curr_elx_fiq
+.balign 0x80
+	EXCEPTION_HANDLER curr_elx_other
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_sync_64
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_irq_64
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_fiq_64
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_other_64
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_sync_32
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_irq_32
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_fiq_32
+.balign 0x80
+	EXCEPTION_HANDLER lower_el_other_32
 exception_return:
     // Restore everything in reverse order that it was saved
 	ldp	x2, x3, [sp, #0x100]

@@ -7,7 +7,7 @@ pub fn _print(args: core::fmt::Arguments) {
 // <https://doc.rust-lang.org/src/std/macros.rs.html>
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::print::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::kernel::print::_print(format_args!($($arg)*)));
 }
 
 /// Print, with a newline, to serial output
@@ -15,7 +15,7 @@ macro_rules! print {
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ({
-        $crate::print::_print(format_args_nl!($($arg)*));
+        $crate::kernel::print::_print(format_args_nl!($($arg)*));
     })
 }
 
@@ -27,8 +27,8 @@ macro_rules! log {
         let timestamp: Duration = crate::kernel::timer::now();
 
         $crate::kernel::print::_print(format_args_nl!(
-            concat!("[TH {:2}, {}.{:03}s] ", $string),
-            crate::architecture::machine::thread_id(),
+            concat!("[T {}, {}.{:03}s] ", $string),
+            crate::architecture::thread::me().id,
             timestamp.as_secs(),
             timestamp.subsec_millis(),
         ));
@@ -38,8 +38,8 @@ macro_rules! log {
         let timestamp: Duration = crate::kernel::timer::now();
 
         $crate::kernel::print::_print(format_args_nl!(
-            concat!("[TH {:2}, {}.{:03}s] ", $format_string),
-            crate::architecture::machine::thread_id(),
+            concat!("[T {}, {}.{:03}s] ", $format_string),
+            crate::architecture::thread::me().id,
             timestamp.as_secs(),
             timestamp.subsec_millis(),
             $($arg)*

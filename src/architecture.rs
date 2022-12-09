@@ -2,9 +2,11 @@
 mod boot;
 mod config;
 pub mod exception;
+mod exception_handlers;
 pub mod machine;
 mod shutdown;
 mod spinlock;
+pub mod thread;
 pub mod timer;
 
 pub use config::CONFIG;
