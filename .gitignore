@@ -2,3 +2,5 @@
 target
 Cargo.lock
 kernel8.img
+kernel8_debug.img
+.gdb_history

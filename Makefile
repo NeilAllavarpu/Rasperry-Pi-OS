@@ -6,9 +6,11 @@ include operating_system.mk
 # RPI3 info
 TARGET            = aarch64-unknown-none-softfloat
 KERNEL_BIN        = kernel8.img
+KERNEL_DEBUG_BIN  = kernel8_debug.img
 QEMU_BINARY       = qemu-system-aarch64
 QEMU_MACHINE_TYPE = raspi3
 QEMU_RELEASE_ARGS = -serial stdio -display none -smp 4 -semihosting
+QEMU_DEBUG_ARGS   = -serial stdio -display none -smp 4 -semihosting -s -S
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
@@ -20,6 +22,7 @@ export LD_SCRIPT_PATH
 # Dependencies
 KERNEL_LINKER_SCRIPT = kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
+KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
 KERNEL_ELF_DEPS = $(shell ls src/**/*)
 
 # Rust + other build things
@@ -27,12 +30,14 @@ RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
     -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
     -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) \
 		-C target-cpu=cortex-a53
+RUSTFLAGS_DEBUG = -g
+RUSTFLAGS_NODEBUG = --release
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     -D warnings                   \
     -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET) --release
+COMPILER_ARGS = --target=$(TARGET)
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
@@ -45,7 +50,8 @@ EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 
 # Docker
 DOCKER_IMAGE 				= rustembedded/osdev-utils:2021.12
-DOCKER_CMD          = docker run -t --rm -v $(shell pwd):/work/tutorial -w /work/tutorial
+DOCKER_FOLDER = /work/tutorial
+DOCKER_CMD          = docker run -t --rm -v $(shell pwd):$(DOCKER_FOLDER) -w $(DOCKER_FOLDER)
 DOCKER_CMD_INTERACT = $(DOCKER_CMD) -i
 DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
 DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)
@@ -57,7 +63,11 @@ all: $(KERNEL_BIN)
 # Compile the kernel
 $(KERNEL_ELF): $(KERNEL_ELF_DEPS)
 	$(call color_header, "Compiling kernel ELF")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD) $(RUSTFLAGS_NODEBUG)
+
+$(KERNEL_DEBUG_ELF): $(KERNEL_ELF_DEPS)
+	$(call color_header, "Compiling kernel ELF")
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC) $(RUSTFLAGS_DEBUG)" $(RUSTC_CMD)
 
 # Generate binary
 $(KERNEL_BIN): $(KERNEL_ELF)
@@ -68,10 +78,25 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(call color_progress_prefix, "Size")
 	$(call disk_usage_KiB, $(KERNEL_BIN))
 
+$(KERNEL_DEBUG_BIN): $(KERNEL_DEBUG_ELF)
+	$(call color_header, "Generating stripped binary")
+	@$(OBJCOPY_CMD) $(KERNEL_DEBUG_ELF) $(KERNEL_DEBUG_BIN)
+	$(call color_progress_prefix, "Name")
+	@echo $(KERNEL_DEBUG_BIN)
+	$(call color_progress_prefix, "Size")
+	$(call disk_usage_KiB, $(KERNEL_DEBUG_BIN))
+
 # Running in QEMU
 qemu: $(KERNEL_BIN)
 	$(call color_header, "Launching QEMU")
 	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN)
+
+qemu_debug: $(KERNEL_DEBUG_BIN)
+	$(call color_header, "Launching QEMU with debugging...")
+	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_DEBUG_ARGS) -kernel $(KERNEL_DEBUG_BIN)
+
+gdb:
+	docker exec -it $(shell docker ps | grep $(DOCKER_IMAGE) | head -c 12) gdb-multiarch $(DOCKER_FOLDER)/$(KERNEL_DEBUG_ELF) -ex "target remote localhost:1234"
 
 # Clippy
 clippy:
