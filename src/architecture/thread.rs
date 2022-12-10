@@ -1,4 +1,4 @@
-use crate::kernel::thread::TCB;
+use crate::kernel::{self, thread::TCB};
 use aarch64_cpu::registers::TPIDR_EL1;
 use core::{
     arch::global_asm,
@@ -61,6 +61,10 @@ pub fn context_switch<Callback>(new_thread: *mut TCB, mut data: Callback) -> ()
 where
     Callback: FnMut(*mut TCB) -> (),
 {
-    let parts = ptr::addr_of_mut!(data).to_raw_parts();
-    unsafe { _context_switch(parts.0, &parts.1, new_thread, invoke_callback::<Callback>) }
+    let me = me();
+    me.runtime += kernel::timer::now() - me.last_started;
+    let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
+        ptr::addr_of_mut!(data).to_raw_parts();
+    unsafe { _context_switch(data, &metadata, new_thread, invoke_callback::<Callback>) }
+    me.last_started = kernel::timer::now()
 }

@@ -13,10 +13,11 @@ use core::{
 pub struct TCB {
     pub id: u64,
     sp: *mut u128,
-    runtime: Duration,
+    pub runtime: Duration,
+    pub last_started: Duration,
     pub work: fn() -> (),
 }
-struct ReadyThreads(Spinlock<BinaryHeap<*mut TCB>>);
+struct ReadyThreads(Spinlock<BinaryHeap<Box<TCB>>>);
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -37,6 +38,7 @@ impl TCB {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
             work,
             runtime: Duration::ZERO,
+            last_started: Duration::default(),
             sp: get_stack(),
         }))
     }
@@ -64,7 +66,7 @@ impl TCB {
 
 impl PartialEq for TCB {
     fn eq(&self, other: &Self) -> bool {
-        self.runtime == other.runtime
+        self.cmp(other).is_eq()
     }
 }
 
@@ -72,7 +74,7 @@ impl Eq for TCB {}
 
 impl PartialOrd for TCB {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.runtime.partial_cmp(&other.runtime)
+        Some(self.cmp(other))
     }
 }
 
@@ -81,7 +83,7 @@ impl PartialOrd for TCB {
 // So we reverse here
 impl Ord for TCB {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+        self.runtime.cmp(&other.runtime).reverse()
     }
 }
 
@@ -93,11 +95,12 @@ impl ReadyThreads {
     }
 
     fn add(&self, thread: *mut TCB) -> () {
-        self.0.lock(|ready| ready.push(thread))
+        self.0
+            .lock(|ready| ready.push(unsafe { Box::from_raw(thread) }))
     }
 
     fn get(&self) -> Option<*mut TCB> {
-        self.0.lock(|ready| ready.pop())
+        self.0.lock(|ready| ready.pop()).map(Box::into_raw)
     }
 }
 
