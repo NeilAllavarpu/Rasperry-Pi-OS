@@ -28,7 +28,7 @@ static READY_THREADS: SetOnce<ReadyThreads> = SetOnce::new();
 static IDLE_THREADS: SetOnce<PerCore<Arc<Thread>>> = SetOnce::new();
 
 fn get_stack() -> *mut u128 {
-    static STACK_NEXT: AtomicPtr<u128> = AtomicPtr::new(0x400000 as *mut u128);
+    static STACK_NEXT: AtomicPtr<u128> = AtomicPtr::new(0x40_0000 as *mut u128);
     const STACK_SIZE: usize = 0x2000;
     let sp = STACK_NEXT.fetch_byte_add(STACK_SIZE, core::sync::atomic::Ordering::Relaxed);
     unsafe { architecture::thread::set_up_stack(sp.byte_add(STACK_SIZE)) }
@@ -51,7 +51,7 @@ impl Thread {
         READY_THREADS.get().threads.lock(|threads| {
             let curr_len = threads.len();
             if curr_len < active_count {
-                threads.reserve(active_count - curr_len)
+                threads.reserve(active_count - curr_len);
             }
         });
         Arc::new(Self {
@@ -123,11 +123,11 @@ impl ReadyThreads {
     }
 
     fn add(&self, thread: Arc<Thread>) {
-        self.threads.lock(|ready| ready.push(thread))
+        self.threads.lock(|ready| ready.push(thread));
     }
 
     fn get(&self) -> Option<Arc<Thread>> {
-        self.threads.lock(|ready| ready.pop())
+        self.threads.lock(BinaryHeap::pop)
     }
 }
 
@@ -136,7 +136,7 @@ pub fn idle_loop() {
         if let Some(thread) = READY_THREADS.get().get() {
             architecture::thread::context_switch(thread, |_me| ());
         }
-        wfe()
+        wfe();
     }
 }
 
@@ -147,7 +147,6 @@ pub fn schedule(thread: Arc<Thread>) {
 }
 
 /// Cooperatively yields to another thread, if another thread is waiting to run
-#[allow(dead_code)]
 pub fn switch() {
     if let Some(thread) = READY_THREADS.get().get() {
         architecture::thread::context_switch(thread, schedule);
@@ -171,5 +170,5 @@ pub fn per_core_init() {
     call_once_per_core!();
     IDLE_THREADS
         .get()
-        .with_current(|idle| unsafe { architecture::thread::set_me(idle.clone()) })
+        .with_current(|idle| unsafe { architecture::thread::set_me(idle.clone()) });
 }

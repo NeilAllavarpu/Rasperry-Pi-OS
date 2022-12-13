@@ -68,7 +68,7 @@ pub struct PerCore<T> {
 }
 
 impl<T> PerCore<T> {
-    /// Creates a default-initialized PerCore struct
+    /// Creates a default-initialized `PerCore` struct
     /// that is initializable at compile time
     pub fn new_from_array(initial: [T; MAX_CORES]) -> Self {
         Self {
@@ -87,7 +87,7 @@ impl<T> PerCore<T> {
 }
 
 impl<T: Copy> PerCore<T> {
-    /// Creates a default-initialized PerCore struct
+    /// Creates a default-initialized `PerCore` struct
     /// that is initializable at compile time
     pub const fn new(initial: T) -> Self {
         Self {

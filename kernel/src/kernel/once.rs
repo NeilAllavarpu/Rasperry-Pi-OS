@@ -7,7 +7,7 @@ pub struct SetOnce<T> {
 }
 
 impl<T> SetOnce<T> {
-    /// Creates an unset SetOnce
+    /// Creates an unset `SetOnce`
     pub const fn new() -> Self {
         Self {
             inner: OnceCell::new(),

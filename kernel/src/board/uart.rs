@@ -97,22 +97,22 @@ impl Uart {
     /// Initializes the UART
     pub fn init(&self) {
         call_once!();
-        self.inner.lock(|inner| inner.init());
+        self.inner.lock(UartInner::init);
     }
 }
 
 impl kernel::Serial for Uart {
     fn write_fmt(&self, args: core::fmt::Arguments) {
-        _ = self.inner.lock(|inner| inner.write_fmt(args))
+        _ = self.inner.lock(|inner| inner.write_fmt(args));
     }
 
     fn read_byte(&self) -> Option<u8> {
-        self.inner.lock(|inner| inner.read_byte())
+        self.inner.lock(UartInner::read_byte)
     }
 }
 
 /// The system-wide UART
-static UART: Uart = unsafe { Uart::new(0x3F201000 as *mut RegisterBlock) };
+static UART: Uart = unsafe { Uart::new(0x3F20_1000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection
 pub fn serial() -> &'static Uart {

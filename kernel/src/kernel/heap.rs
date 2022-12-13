@@ -6,8 +6,8 @@ use core::{
     cmp::{max, min},
 };
 
-const HEAP_START: *mut () = 0x200000 as *mut ();
-const HEAP_SIZE: usize = 0x200000;
+const HEAP_START: *mut () = 0x20_0000 as *mut ();
+const HEAP_SIZE: usize = 0x20_0000;
 
 struct FreeBlock(*mut FreeBlock);
 impl kernel::Stackable for FreeBlock {
@@ -41,7 +41,7 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         let block = self.first_free.pop();
         if block.is_none() {
             // For now, simply warn if the heap is out of memory
-            log!("Out of heap space!")
+            log!("Out of heap space!");
         }
         block.map(|block| (block as *mut FreeBlock).cast())
     }
@@ -49,7 +49,7 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
     unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) {
         unsafe {
             self.first_free
-                .push(ptr.cast::<FreeBlock>().as_mut().unwrap())
+                .push(ptr.cast::<FreeBlock>().as_mut().unwrap());
         }
     }
 
@@ -62,11 +62,11 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         for block_offset in (0..size).step_by(BLOCK_SIZE) {
             unsafe {
                 self.first_free
-                    .push(&mut *start.byte_add(block_offset).cast())
+                    .push(&mut *start.byte_add(block_offset).cast());
             }
         }
 
-        self.size = size
+        self.size = size;
     }
 
     /// Logs statistics regarding heap usage
@@ -79,7 +79,7 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
             BLOCK_SIZE,
             blocks_free,
             self.size / BLOCK_SIZE - blocks_free
-        )
+        );
     }
 }
 
@@ -101,11 +101,15 @@ impl HeapAllocator {
 
     fn init(&self) {
         call_once!();
-        unsafe { (*self.b512.get()).init(HEAP_START, HEAP_SIZE * 3 / 4) }
         unsafe {
-            (*self.b128.get()).init(HEAP_START.byte_add(HEAP_SIZE * 3 / 4), HEAP_SIZE * 3 / 16)
+            (*self.b512.get()).init(HEAP_START, HEAP_SIZE * 3 / 4);
         }
-        unsafe { (*self.b32.get()).init(HEAP_START.byte_add(HEAP_SIZE * 15 / 16), HEAP_SIZE / 16) }
+        unsafe {
+            (*self.b128.get()).init(HEAP_START.byte_add(HEAP_SIZE * 3 / 4), HEAP_SIZE * 3 / 16);
+        }
+        unsafe {
+            (*self.b32.get()).init(HEAP_START.byte_add(HEAP_SIZE * 15 / 16), HEAP_SIZE / 16);
+        }
     }
 
     unsafe fn log(&self) {

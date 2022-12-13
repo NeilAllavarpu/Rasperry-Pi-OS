@@ -62,7 +62,7 @@ extern "C" fn invoke_callback<Callback>(
 {
     unsafe { ptr::from_raw_parts_mut::<Callback>(data_address, *metadata).as_mut() }
         .unwrap()
-        .call_once((unsafe { Arc::from_raw(previous_thread) },))
+        .call_once((unsafe { Arc::from_raw(previous_thread) },));
 }
 
 /// Context switches into the given thread, and invokes the callback after switching threads
@@ -80,8 +80,8 @@ where
                 &metadata,
                 Arc::into_raw(new_thread) as *mut Thread,
                 invoke_callback::<Callback>,
-            )
+            );
         }
-        me.last_started = kernel::timer::now()
+        me.last_started = kernel::timer::now();
     });
 }

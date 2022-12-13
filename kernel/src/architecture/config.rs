@@ -105,11 +105,11 @@ impl Config {
             ),
             is_uniprocessor: ConfigEntry::new(
                 "Is uniprocessor system",
-                (MPIDR_EL1.get() & 0x40000000_u64) != 0,
+                (MPIDR_EL1.get() & 0x4000_0000_u64) != 0,
             ),
             multithreading_low_affinity: ConfigEntry::new(
                 "Hardware threading",
-                (MPIDR_EL1.get() & 0x800000_u64) != 0,
+                (MPIDR_EL1.get() & 0x80_0000_u64) != 0,
             ),
             product_info: ConfigEntry::new(
                 "Device variant/version",
@@ -127,7 +127,7 @@ impl Config {
             ),
             timer_frequency: ConfigEntry::new(
                 "Timer frequency (Hz)",
-                architecture::timer::timer_frequency(),
+                architecture::timer::frequency(),
             ),
         }
     }
@@ -147,7 +147,7 @@ impl Config {
         log!("*** Timer info");
         self.timer_frequency.log();
 
-        log!("--- END ABOUT ME ---")
+        log!("--- END ABOUT ME ---");
     }
 }
 

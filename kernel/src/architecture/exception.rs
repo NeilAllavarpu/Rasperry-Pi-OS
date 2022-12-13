@@ -22,10 +22,10 @@ pub fn init() {}
 
 /// Ready exception handling by setting the exception vector base address register.
 pub fn per_core_init() {
-    call_once_per_core!();
     extern "Rust" {
         static _exception_vector: core::cell::UnsafeCell<()>;
     }
+    call_once_per_core!();
 
     VBAR_EL1.set(unsafe { _exception_vector.get().to_bits().try_into().unwrap() });
 
@@ -48,15 +48,15 @@ pub fn enable() {
     SCTLR_EL1.modify(SCTLR_EL1::A::Enable);
 }
 
-pub struct ExceptionMasks {
+pub struct Masks {
     prior: u64,
 }
 
 /// Disables interrupts
 /// # Safety
 /// Must be paired with a `restore` to ensure that the interrupt state is preserved correctly
-pub unsafe fn disable() -> ExceptionMasks {
-    let state = ExceptionMasks { prior: DAIF.get() };
+pub unsafe fn disable() -> Masks {
+    let state = Masks { prior: DAIF.get() };
     DAIF.set(0);
     state
 }
@@ -64,6 +64,6 @@ pub unsafe fn disable() -> ExceptionMasks {
 /// Re-enables interrupts after having been disabled
 /// # Safety
 /// The given interrupt state must be from the return value of the most recent `disable` on this thread
-pub unsafe fn restore(state: ExceptionMasks) {
+pub unsafe fn restore(state: &Masks) {
     DAIF.set(state.prior);
 }

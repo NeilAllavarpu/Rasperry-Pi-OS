@@ -19,7 +19,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 // etc
 #![reexport_test_harness_main = "test_main"]
-#![test_runner(crate::test_runner)]
+#![test_runner(test_runner)]
 
 extern crate alloc;
 

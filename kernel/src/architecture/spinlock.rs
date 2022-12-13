@@ -31,7 +31,7 @@ impl<T> crate::kernel::Mutex for SpinLock<T> {
         let mut state = unsafe { exception::disable() };
         while self.is_locked.swap(true, Ordering::AcqRel) {
             unsafe {
-                exception::restore(state);
+                exception::restore(&state);
             }
 
             wfe();
@@ -44,7 +44,7 @@ impl<T> crate::kernel::Mutex for SpinLock<T> {
         self.is_locked.store(false, Ordering::Release);
         sev();
         unsafe {
-            exception::restore(state);
+            exception::restore(&state);
         }
         result
     }

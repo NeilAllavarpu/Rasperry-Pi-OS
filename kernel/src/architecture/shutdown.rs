@@ -10,7 +10,7 @@ pub fn shutdown(exit_code: u32) -> ! {
     if SHUTDOWN_CALLED.swap(true, Ordering::Relaxed) {
         loop {
             // Don't double-shut down, just enter low power state
-            wfi()
+            wfi();
         }
     }
 
@@ -22,5 +22,5 @@ pub fn shutdown(exit_code: u32) -> ! {
     unsafe {
         kernel::heap::log_allocator();
     }
-    qemu_exit::AArch64::new().exit(exit_code)
+    qemu_exit::AArch64::new().exit(exit_code);
 }

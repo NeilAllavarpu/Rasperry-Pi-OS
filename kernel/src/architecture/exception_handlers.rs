@@ -48,7 +48,7 @@ register_bitfields![u64, DataAbortISS [
         DOUBLEWORD = 0b11,
     ],
     DFSC OFFSET(0) NUMBITS(6) [
-        ALIGNMENT_FAULT = 0b100001,
+        ALIGNMENT_FAULT = 0b10_0001,
     ]
 ]];
 
@@ -72,13 +72,12 @@ fn handle_instruction_abort() {
     }
 
     match ESR_EL1.read_as_enum::<DataAbortISS::DFSC::Value>(ESR_EL1::ISS) {
-        Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => {
-            log!("Reason: Alignment fault")
-        }
+        Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => log!("Reason: Alignment fault"),
+
         _ => log!("Unhandled status code"),
     }
 
-    log!("{:b}", ESR_EL1.get() & 0b111111);
+    log!("{:b}", ESR_EL1.get() & 0b11_1111);
 
     panic!("Unable to handle exception");
 }
@@ -103,13 +102,11 @@ fn handle_data_abort() {
     }
 
     match ESR_EL1.read_as_enum::<DataAbortISS::DFSC::Value>(ESR_EL1::ISS) {
-        Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => {
-            log!("Reason: Alignment fault")
-        }
+        Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => log!("Reason: Alignment fault"),
         _ => log!("Unhandled status code"),
     }
 
-    log!("{:b}", ESR_EL1.get() & 0b111111);
+    log!("{:b}", ESR_EL1.get() & 0b11_1111);
 
     panic!("Unable to handle exception");
 }

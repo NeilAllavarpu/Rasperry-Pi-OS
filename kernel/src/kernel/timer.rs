@@ -7,13 +7,13 @@ use core::{
     time::Duration,
 };
 
-const NANOSEC_PER_SEC: NonZeroU32 = NonZeroU32::new(1000000000).unwrap();
+const NANOSEC_PER_SEC: NonZeroU32 = NonZeroU32::new(1_000_000_000).unwrap();
 
 /// Encloses a timer given tick value
-pub struct TimerValue(u64);
+pub struct Tick(u64);
 
-impl TimerValue {
-    const MAX: Self = TimerValue(u64::MAX);
+impl Tick {
+    const MAX: Self = Tick(u64::MAX);
 
     pub const fn new(ticks: u64) -> Self {
         Self(ticks)
@@ -24,7 +24,7 @@ impl TimerValue {
     }
 }
 
-impl Add for TimerValue {
+impl Add for Tick {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -32,10 +32,10 @@ impl Add for TimerValue {
     }
 }
 
-impl From<TimerValue> for Duration {
-    fn from(timer_value: TimerValue) -> Self {
+impl From<Tick> for Duration {
+    fn from(timer_value: Tick) -> Self {
         let nanoseconds: u128 = u128::from(timer_value.ticks()) * u128::from(NANOSEC_PER_SEC.get())
-            / NonZeroU128::from(architecture::timer::timer_frequency());
+            / NonZeroU128::from(architecture::timer::frequency());
 
         Self::new(
             (nanoseconds / NonZeroU128::from(NANOSEC_PER_SEC))
@@ -48,17 +48,16 @@ impl From<TimerValue> for Duration {
     }
 }
 
-impl TryFrom<Duration> for TimerValue {
+impl TryFrom<Duration> for Tick {
     type Error = &'static str;
 
     fn try_from(duration: Duration) -> Result<Self, Self::Error> {
-        if duration > Duration::from(TimerValue::MAX) {
+        if duration > Duration::from(Tick::MAX) {
             return Err("Duration is too large to represent with the given timer");
         }
 
         Ok(Self(
-            (duration.as_nanos()
-                * u128::from(NonZeroU128::from(architecture::timer::timer_frequency()))
+            (duration.as_nanos() * u128::from(NonZeroU128::from(architecture::timer::frequency()))
                 / NonZeroU128::from(NANOSEC_PER_SEC))
             .try_into()
             .unwrap(),

@@ -108,14 +108,12 @@ impl<T: Stackable> BoxStack<T> {
 
     /// Adds an element to the top of the stack
     pub fn push(&self, value: Box<T>) {
-        self.stack.push(unsafe { &mut *Box::into_raw(value) })
+        self.stack.push(unsafe { &mut *Box::into_raw(value) });
     }
 
     /// Removes the first element from the top of the stack
     pub fn pop(&self) -> Option<Box<T>> {
-        self.stack
-            .pop()
-            .map(|value| unsafe { Box::from_raw(value) })
+        self.stack.pop().map(|t| unsafe { Box::from_raw(t) })
     }
 
     /// Computes the current depth of the the stack, for logging purposes
