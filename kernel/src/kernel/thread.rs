@@ -1,5 +1,6 @@
 use crate::{
-    architecture::{self, Spinlock},
+    architecture::{self, SpinLock},
+    call_once, call_once_per_core,
     kernel::{Mutex, PerCore, SetOnce},
 };
 use aarch64_cpu::asm::{sev, wfe};
@@ -15,9 +16,11 @@ pub struct TCB {
     sp: *mut u128,
     pub runtime: Duration,
     pub last_started: Duration,
-    pub work: Box<dyn FnMut() -> ()>,
+    pub work: Box<dyn FnMut()>,
 }
-struct ReadyThreads(Spinlock<BinaryHeap<Box<TCB>>>);
+struct ReadyThreads {
+    threads: SpinLock<BinaryHeap<Box<TCB>>>,
+}
 
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 static ACTIVE_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -34,15 +37,16 @@ fn get_stack() -> *mut u128 {
 #[macro_export]
 macro_rules! thread {
     ($work: ident) => {
-        crate::kernel::thread::TCB::new_from_function($work)
+        $crate::kernel::thread::TCB::new_from_function($work)
     };
     ($work: expr) => {
-        crate::kernel::thread::TCB::new(alloc::boxed::Box::new($work))
+        $crate::kernel::thread::TCB::new(alloc::boxed::Box::new($work))
     };
 }
 
 impl TCB {
-    pub fn new(work: Box<dyn FnMut() -> ()>) -> *mut Self {
+    /// Creates a new thread, with the given closure as its execution path
+    pub fn new(work: Box<dyn FnMut()>) -> *mut Self {
         ACTIVE_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
         Box::into_raw(Box::new(Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
@@ -53,29 +57,32 @@ impl TCB {
         }))
     }
 
-    pub fn new_from_function(work: fn() -> ()) -> *mut Self {
+    /// Creates a new thread, with the given function as its execution path
+    pub fn new_from_function(work: fn()) -> *mut Self {
         Self::new(Box::new(work))
     }
 
-    pub fn run(&mut self) -> ! {
+    /// Runs the current thread
+    /// # Safety
+    /// This should only be called once per thread, to begin its execution
+    pub unsafe fn run(&mut self) -> ! {
         (self.work)();
-        self.stop();
+        stop();
     }
+}
 
-    pub fn stop(&self) -> ! {
-        if ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed) == 1 {
-            architecture::shutdown(0);
-        }
-        architecture::thread::context_switch(
-            READY_THREADS.get().get().unwrap_or(
-                unsafe { (*(IDLE_THREADS.get().with_current(|idle| idle))).as_mut() }.unwrap(),
-            ),
-            |me: *mut Self| unsafe {
-                drop(Box::from_raw(me));
-            },
-        );
-        unreachable!()
+/// Stops the currently executing thread, and releases its resources
+pub fn stop() -> ! {
+    if ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed) == 1 {
+        architecture::shutdown(0);
     }
+    architecture::thread::context_switch(
+        READY_THREADS.get().get().unwrap_or_else(|| {
+            unsafe { (*(IDLE_THREADS.get().with_current(|idle| idle))).as_mut() }.unwrap()
+        }),
+        |me: *mut TCB| drop(unsafe { Box::from_raw(me) }),
+    );
+    unreachable!()
 }
 
 impl PartialEq for TCB {
@@ -104,50 +111,47 @@ impl Ord for TCB {
 impl ReadyThreads {
     fn new() -> Self {
         Self {
-            0: Spinlock::new(BinaryHeap::new()),
+            threads: SpinLock::new(BinaryHeap::new()),
         }
     }
 
-    fn add(&self, thread: *mut TCB) -> () {
-        self.0
+    fn add(&self, thread: *mut TCB) {
+        self.threads
             .lock(|ready| ready.push(unsafe { Box::from_raw(thread) }))
     }
 
     fn get(&self) -> Option<*mut TCB> {
-        self.0.lock(|ready| ready.pop()).map(Box::into_raw)
+        self.threads.lock(|ready| ready.pop()).map(Box::into_raw)
     }
 }
 
-pub fn idle_loop() -> () {
+pub fn idle_loop() {
     loop {
-        match READY_THREADS.get().get() {
-            Some(thread) => {
-                architecture::thread::context_switch(thread, |_me| ());
-            }
-            None => (),
+        if let Some(thread) = READY_THREADS.get().get() {
+            architecture::thread::context_switch(thread, |_me| ());
         }
         wfe()
     }
 }
 
-pub fn schedule(thread: *mut TCB) -> () {
+/// Schedules a thread to be run
+pub fn schedule(thread: *mut TCB) {
     READY_THREADS.get().add(thread);
     sev();
 }
 
+/// Cooperatively yields to another thread, if another thread is waiting to run
 #[allow(dead_code)]
 pub fn switch() {
-    match READY_THREADS.get().get() {
-        Some(thread) => {
-            architecture::thread::context_switch(thread, |me: *mut TCB| {
-                schedule(me);
-            });
-        }
-        None => (),
+    if let Some(thread) = READY_THREADS.get().get() {
+        architecture::thread::context_switch(thread, |me: *mut TCB| {
+            schedule(me);
+        });
     }
 }
 
-pub fn init() -> () {
+pub fn init() {
+    call_once!();
     READY_THREADS.set(ReadyThreads::new());
     IDLE_THREADS.set(PerCore::new_from_array([
         thread!(idle_loop),
@@ -159,7 +163,8 @@ pub fn init() -> () {
     ACTIVE_THREAD_COUNT.store(0, Ordering::Relaxed);
 }
 
-pub fn per_core_init() -> () {
+pub fn per_core_init() {
+    call_once_per_core!();
     IDLE_THREADS
         .get()
         .with_current(|idle| unsafe { architecture::thread::set_me(*idle) })

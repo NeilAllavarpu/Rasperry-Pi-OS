@@ -1,5 +1,4 @@
 .section .text
-# fn context_switch(new_thread: *mut TCB) -> ();
 .global _context_switch
 _context_switch:
     # Save context to stack

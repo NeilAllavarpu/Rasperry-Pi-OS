@@ -1,3 +1,5 @@
+/// Invokes a system shutdown, as appropriate
+/// In QEMU, this exits QEMU
 pub fn shutdown(exit_code: u32) -> ! {
     use crate::{architecture, kernel, log};
     use aarch64_cpu::asm::wfi;

@@ -11,7 +11,7 @@ pub mod timer;
 
 pub use config::CONFIG;
 pub use shutdown::shutdown;
-pub use spinlock::Spinlock;
+pub use spinlock::SpinLock;
 
 pub fn init() {
     crate::call_once!();

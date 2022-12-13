@@ -1,4 +1,4 @@
-use crate::{architecture::Spinlock, call_once, kernel, kernel::Mutex};
+use crate::{architecture::SpinLock, call_once, kernel, kernel::Mutex};
 use core::{
     fmt::{self, Write},
     ops,
@@ -8,6 +8,7 @@ use tock_registers::{
     register_structs,
     registers::ReadWrite,
 };
+
 register_structs! {
     #[allow(non_snake_case)]
     pub RegisterBlock {
@@ -16,18 +17,18 @@ register_structs! {
     }
 }
 
-pub struct MMIO<T> {
+pub struct Mmio<T> {
     start_addr: *mut T,
 }
 
-impl<T> MMIO<T> {
+impl<T> Mmio<T> {
     /// Create an instance.
     pub const unsafe fn new(start_addr: *mut T) -> Self {
         Self { start_addr }
     }
 }
 
-impl<T> ops::Deref for MMIO<T> {
+impl<T> ops::Deref for Mmio<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -36,20 +37,20 @@ impl<T> ops::Deref for MMIO<T> {
 }
 
 /// Abstraction for the associated MMIO registers.
-type Registers = MMIO<RegisterBlock>;
+type Registers = Mmio<RegisterBlock>;
 
-struct UARTInner {
+struct UartInner {
     registers: Registers,
 }
 /// Representation of the UART.
-pub struct UART {
-    inner: Spinlock<UARTInner>,
+pub struct Uart {
+    inner: SpinLock<UartInner>,
 }
 
-impl UARTInner {
+impl UartInner {
     /// Creates a raw UART instance
-    ///
-    /// **SAFETY**: The start address must be correct, and the range must not be used by anything else.
+    /// # Safety
+    /// The start address must be correct, and the range must not be used by anything else.
     /// This includes not initializing the UART multiple times
     pub const unsafe fn new(mmio_start_addr: *mut RegisterBlock) -> Self {
         Self {
@@ -72,7 +73,7 @@ impl UARTInner {
     }
 }
 
-impl fmt::Write for UARTInner {
+impl fmt::Write for UartInner {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for byte in s.bytes() {
             self.write_byte(byte);
@@ -82,14 +83,14 @@ impl fmt::Write for UARTInner {
     }
 }
 
-impl UART {
+impl Uart {
     /// Creates a UART instance
-    ///
-    /// **SAFETY**: The start address must be correct, and the range must not be used by anything else.
+    /// # Safety
+    /// The start address must be correct, and the range must not be used by anything else.
     /// This includes not initializing the UART multiple times
     pub const unsafe fn new(start_address: *mut RegisterBlock) -> Self {
         Self {
-            inner: Spinlock::new(unsafe { UARTInner::new(start_address) }),
+            inner: SpinLock::new(unsafe { UartInner::new(start_address) }),
         }
     }
 
@@ -100,8 +101,8 @@ impl UART {
     }
 }
 
-impl kernel::Serial for UART {
-    fn write_fmt(&self, args: core::fmt::Arguments) -> () {
+impl kernel::Serial for Uart {
+    fn write_fmt(&self, args: core::fmt::Arguments) {
         _ = self.inner.lock(|inner| inner.write_fmt(args))
     }
 
@@ -111,9 +112,9 @@ impl kernel::Serial for UART {
 }
 
 /// The system-wide UART
-static UART: UART = unsafe { UART::new(0x3F201000 as *mut RegisterBlock) };
+static UART: Uart = unsafe { Uart::new(0x3F201000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection
-pub fn serial() -> &'static UART {
+pub fn serial() -> &'static Uart {
     &UART
 }

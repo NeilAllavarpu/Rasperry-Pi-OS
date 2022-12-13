@@ -4,12 +4,13 @@ use core::{
 };
 
 /// A spinlock mutex
-pub struct Spinlock<T> {
+pub struct SpinLock<T> {
     inner: UnsafeCell<T>,
     is_locked: AtomicBool,
 }
 
-impl<T> Spinlock<T> {
+impl<T> SpinLock<T> {
+    /// Creates a spinlock around the given data
     pub const fn new(data: T) -> Self {
         Self {
             inner: UnsafeCell::new(data),
@@ -18,16 +19,16 @@ impl<T> Spinlock<T> {
     }
 }
 
-unsafe impl<T> Send for Spinlock<T> {}
-unsafe impl<T> Sync for Spinlock<T> {}
+unsafe impl<T> Send for SpinLock<T> {}
+unsafe impl<T> Sync for SpinLock<T> {}
 
-impl<T> crate::kernel::Mutex for Spinlock<T> {
+impl<T> crate::kernel::Mutex for SpinLock<T> {
     type State = T;
 
     fn lock<'a, R>(&'a self, f: impl FnOnce(&'a mut Self::State) -> R) -> R {
         use crate::architecture::exception;
         use aarch64_cpu::asm::{sev, wfe};
-        let mut state: exception::ExceptionMasks = unsafe { exception::disable() };
+        let mut state = unsafe { exception::disable() };
         while self.is_locked.swap(true, Ordering::AcqRel) {
             unsafe {
                 exception::restore(state);

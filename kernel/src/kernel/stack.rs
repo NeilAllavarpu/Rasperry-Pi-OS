@@ -4,7 +4,9 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 pub trait Stackable {
     /// Sets the next pointer, when in the stack
     /// Undefined behavior if called manually
-    unsafe fn set_next(&mut self, next: *mut Self) -> ();
+    /// # Safety
+    /// Only the internal stack implementation should call this function
+    unsafe fn set_next(&mut self, next: *mut Self);
 
     /// Reads the next pointer, when in the stack
     /// The value is only valid when in the stack
@@ -18,13 +20,15 @@ pub struct Stack<T: Stackable> {
 }
 
 impl<T: Stackable> Stack<T> {
+    /// Creates a new, empty stack
     pub const fn new() -> Self {
         Self {
             top: AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 
-    pub unsafe fn push(&self, value: &mut T) -> () {
+    /// Adds an element to the top of the stack
+    pub fn push(&self, value: &mut T) {
         let mut top_ptr = self.top.load(Ordering::Relaxed);
         loop {
             unsafe { value.set_next(top_ptr) }
@@ -43,7 +47,8 @@ impl<T: Stackable> Stack<T> {
         }
     }
 
-    pub unsafe fn pop(&self) -> Option<&mut T> {
+    /// Removes the first element from the top of the stack
+    pub fn pop(&self) -> Option<&mut T> {
         let mut top_ptr = self.top.load(Ordering::Relaxed);
         loop {
             if top_ptr.is_null() {
@@ -68,7 +73,11 @@ impl<T: Stackable> Stack<T> {
         }
     }
 
-    /// Only for logging purposes: not thread safe, inaccurate if concurrent modification
+    /// Computes the current depth of the the stack, for logging purposes
+    /// Not thread safe, or perfectly accurate
+    ///
+    /// # Safety
+    /// Use *only* for logging purposes
     pub unsafe fn depth(&self) -> usize {
         let mut ptr = self.top.load(Ordering::Relaxed);
         let mut depth: usize = 0;
@@ -84,22 +93,37 @@ unsafe impl<T: Stackable> Send for Stack<T> {}
 unsafe impl<T: Stackable> Sync for Stack<T> {}
 
 /// Stack which contains boxed values
-pub struct BoxStack<T: Stackable>(Stack<T>);
+pub struct BoxStack<T: Stackable> {
+    stack: Stack<T>,
+}
+
 #[allow(dead_code)]
 impl<T: Stackable> BoxStack<T> {
+    /// Creates a new, empty stack
     pub const fn new() -> Self {
-        Self { 0: Stack::new() }
+        Self {
+            stack: Stack::new(),
+        }
     }
 
-    pub fn push(&self, value: Box<T>) -> () {
-        unsafe { self.0.push(&mut *Box::into_raw(value)) }
+    /// Adds an element to the top of the stack
+    pub fn push(&self, value: Box<T>) {
+        self.stack.push(unsafe { &mut *Box::into_raw(value) })
     }
 
+    /// Removes the first element from the top of the stack
     pub fn pop(&self) -> Option<Box<T>> {
-        unsafe { self.0.pop() }.map(|value| unsafe { Box::from_raw(value) })
+        self.stack
+            .pop()
+            .map(|value| unsafe { Box::from_raw(value) })
     }
 
+    /// Computes the current depth of the the stack, for logging purposes
+    /// Not thread safe, or perfectly accurate
+    ///
+    /// # Safety
+    /// Use *only* for logging purposes
     pub unsafe fn depth(&self) -> usize {
-        unsafe { self.0.depth() }
+        unsafe { self.stack.depth() }
     }
 }

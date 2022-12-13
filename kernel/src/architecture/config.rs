@@ -15,7 +15,7 @@ impl<T> ConfigEntry<T> {
 }
 
 impl ConfigEntry<bool> {
-    fn log(&self) -> () {
+    fn log(&self) {
         log!(
             "{}: {}",
             self.description,
@@ -25,19 +25,19 @@ impl ConfigEntry<bool> {
 }
 
 impl ConfigEntry<&'static str> {
-    fn log(&self) -> () {
+    fn log(&self) {
         log!("{}: {}", self.description, self.value);
     }
 }
 
 impl ConfigEntry<NonZeroU32> {
-    fn log(&self) -> () {
+    fn log(&self) {
         log!("{}: {}", self.description, self.value);
     }
 }
 
 impl ConfigEntry<(u8, u8, u8)> {
-    fn log(&self) -> () {
+    fn log(&self) {
         log!(
             "{}: {}.{}.{}",
             self.description,
@@ -105,11 +105,11 @@ impl Config {
             ),
             is_uniprocessor: ConfigEntry::new(
                 "Is uniprocessor system",
-                (MPIDR_EL1.get() & 0x40000000) == 1,
+                (MPIDR_EL1.get() & 0x40000000_u64) != 0,
             ),
             multithreading_low_affinity: ConfigEntry::new(
                 "Hardware threading",
-                (MPIDR_EL1.get() & 0x800000) == 1,
+                (MPIDR_EL1.get() & 0x800000_u64) != 0,
             ),
             product_info: ConfigEntry::new(
                 "Device variant/version",
@@ -132,7 +132,7 @@ impl Config {
         }
     }
 
-    pub fn log(&self) -> () {
+    pub fn log(&self) {
         log!("---  ABOUT  ME  ---");
 
         log!("*** Device info");

@@ -15,7 +15,7 @@
 #![feature(default_alloc_error_handler)]
 #![feature(pointer_byte_offsets)]
 #![forbid(unsafe_op_in_unsafe_fn)]
-//cfg
+#![feature(pointer_is_aligned)]
 #![reexport_test_harness_main = "test_main"]
 #![feature(custom_test_frameworks)]
 #![test_runner(test_runner)]

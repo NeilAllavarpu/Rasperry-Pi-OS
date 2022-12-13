@@ -18,10 +18,10 @@ pub fn exception_level() -> PrivilegeLevel {
     }
 }
 
-pub fn init() -> () {}
+pub fn init() {}
 
 /// Ready exception handling by setting the exception vector base address register.
-pub fn per_core_init() -> () {
+pub fn per_core_init() {
     call_once_per_core!();
     extern "Rust" {
         static _exception_vector: core::cell::UnsafeCell<()>;
@@ -33,8 +33,11 @@ pub fn per_core_init() -> () {
     barrier::isb(barrier::SY);
 }
 
-/// I'm scared
-pub fn enable() -> () {
+/// Turns on interrupts
+/// # Safety
+/// This function should only be used to enable interrupts when cores begin to run
+/// At all other times, restoring interrupts should be preferred instead
+pub fn enable() {
     call_once_per_core!();
     assert!(
         DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
@@ -49,14 +52,18 @@ pub struct ExceptionMasks {
     prior: u64,
 }
 
-/// Must be paired with a `restore`
+/// Disables interrupts
+/// # Safety
+/// Must be paired with a `restore` to ensure that the interrupt state is preserved correctly
 pub unsafe fn disable() -> ExceptionMasks {
     let state = ExceptionMasks { prior: DAIF.get() };
     DAIF.set(0);
     state
 }
 
-/// Must be paired with a `disable`
-pub unsafe fn restore(state: ExceptionMasks) -> () {
+/// Re-enables interrupts after having been disabled
+/// # Safety
+/// The given interrupt state must be from the return value of the most recent `disable` on this thread
+pub unsafe fn restore(state: ExceptionMasks) {
     DAIF.set(state.prior);
 }

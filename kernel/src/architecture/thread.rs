@@ -6,29 +6,34 @@ use core::{
 };
 use tock_registers::interfaces::{Readable, Writeable};
 
+/// Returns a mutable reference to the currently running thread
 pub fn me<'a>() -> &'a mut TCB {
     unsafe { &mut *<*mut TCB>::from_bits(TPIDR_EL1.get().try_into().unwrap()) }
 }
 
-pub unsafe fn set_me(thread: *mut TCB) -> () {
+/// Sets the currently running thread
+/// # Safety
+/// Only the initialization sequence should call this, using the idle threads
+pub unsafe fn set_me(thread: *mut TCB) {
     TPIDR_EL1.set(thread.to_bits().try_into().unwrap())
 }
 
 #[no_mangle]
 extern "C" fn thread_trampoline() -> ! {
-    me().run();
+    unsafe { me().run() }
 }
 
-/// **SAFETY**: `stack_top` must be a valid pointer to the top of a newly allocated stack
+/// Creates a stack appropriate to trampoline start a thread
+/// # Safety
+/// `stack_top` must be a valid pointer to the top of a newly allocated stack
 pub unsafe fn set_up_stack(stack_top: *mut u128) -> *mut u128 {
     unsafe {
         let desired_top = stack_top.byte_sub(0x70);
         // The upper 64 bits of the entry store the LR to return to
         // The lower 64 bits of the entry store the FP,
         // zeroed here to indicate the end of the call chain
-        desired_top.write(
-            u128::try_from((thread_trampoline as *const fn() -> ()).to_bits()).unwrap() << 64,
-        );
+        desired_top
+            .write(u128::try_from((thread_trampoline as *const fn()).to_bits()).unwrap() << 64);
         desired_top
     }
 }
@@ -40,26 +45,26 @@ extern "C" {
         data: *mut (),
         metadata: *const (),
         new_thread: *mut TCB,
-        callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut TCB) -> (),
-    ) -> ();
+        callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut TCB),
+    );
 }
 
 extern "C" fn invoke_callback<Callback>(
     data_address: *mut (),
     metadata: *const <Callback as Pointee>::Metadata,
     previous_thread: *mut TCB,
-) -> ()
-where
-    Callback: FnMut(*mut TCB) -> (),
+) where
+    Callback: FnMut(*mut TCB),
 {
     unsafe { ptr::from_raw_parts_mut::<Callback>(data_address, *metadata).as_mut() }
         .unwrap()
         .call_once((previous_thread,))
 }
 
-pub fn context_switch<Callback>(new_thread: *mut TCB, mut data: Callback) -> ()
+/// Context switches into the given thread, and invokes the callback after switching threads
+pub fn context_switch<Callback>(new_thread: *mut TCB, mut data: Callback)
 where
-    Callback: FnMut(*mut TCB) -> (),
+    Callback: FnMut(*mut TCB),
 {
     let me = me();
     me.runtime += kernel::timer::now() - me.last_started;

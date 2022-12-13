@@ -28,7 +28,7 @@ macro_rules! log {
         use core::time::Duration;
         let timestamp: Duration = crate::kernel::timer::now();
 
-        crate::kernel::print::_print(format_args_nl!(
+        $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $string),
             crate::architecture::thread::me().id,
             timestamp.as_secs(),
@@ -39,7 +39,7 @@ macro_rules! log {
         use core::time::Duration;
         let timestamp: Duration = crate::kernel::timer::now();
 
-        crate::kernel::print::_print(format_args_nl!(
+        $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $format_string),
             crate::architecture::thread::me().id,
             timestamp.as_secs(),
@@ -53,12 +53,12 @@ macro_rules! log {
 #[macro_export]
 macro_rules! log {
     ($string:expr) => ({
-        crate::kernel::print::_unused(format_args_nl!(
+        $crate::kernel::print::_unused(format_args_nl!(
              $string,
         ));
     });
     ($format_string:expr, $($arg:tt)*) => ({
-        crate::kernel::print::_unused(format_args_nl!(
+        $crate::kernel::print::_unused(format_args_nl!(
             $format_string,
             $($arg)*
         ));

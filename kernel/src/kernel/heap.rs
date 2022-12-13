@@ -15,7 +15,7 @@ impl kernel::Stackable for FreeBlock {
         self.0
     }
 
-    unsafe fn set_next(&mut self, next: *mut Self) -> () {
+    unsafe fn set_next(&mut self, next: *mut Self) {
         self.0 = next;
     }
 }
@@ -38,7 +38,7 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         if layout.size() > BLOCK_SIZE {
             return None;
         }
-        let block = unsafe { self.first_free.pop() };
+        let block = self.first_free.pop();
         if block.is_none() {
             // For now, simply warn if the heap is out of memory
             log!("Out of heap space!")
@@ -46,14 +46,16 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         block.map(|block| (block as *mut FreeBlock).cast())
     }
 
-    unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) -> () {
+    unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) {
         unsafe {
             self.first_free
                 .push(ptr.cast::<FreeBlock>().as_mut().unwrap())
         }
     }
 
-    /// **SAFETY**: The range of memory given must be appropriate
+    /// Initializes the heap over the given range of memory
+    /// # Safety
+    /// The range of memory given must be appropriate
     unsafe fn init(&mut self, start: *mut (), size: usize) {
         assert!(BLOCK_SIZE.is_power_of_two());
 
@@ -67,6 +69,9 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
         self.size = size
     }
 
+    /// Logs statistics regarding heap usage
+    /// # Safety
+    /// This function is not thread safe. It is intended to only be used for logging purposes.
     unsafe fn log(&self) {
         let blocks_free = unsafe { self.first_free.depth() };
         log!(
@@ -94,7 +99,7 @@ impl HeapAllocator {
         }
     }
 
-    fn init(&self) -> () {
+    fn init(&self) {
         call_once!();
         unsafe { (*self.b512.get()).init(HEAP_START, HEAP_SIZE * 3 / 4) }
         unsafe {
@@ -103,7 +108,7 @@ impl HeapAllocator {
         unsafe { (*self.b32.get()).init(HEAP_START.byte_add(HEAP_SIZE * 15 / 16), HEAP_SIZE / 16) }
     }
 
-    unsafe fn log(&self) -> () {
+    unsafe fn log(&self) {
         unsafe {
             (*self.b512.get()).log();
             (*self.b128.get()).log();
@@ -121,21 +126,21 @@ unsafe impl GlobalAlloc for HeapAllocator {
             0..=32 => {
                 unsafe { KERNEL_HEAP.b32.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
-            0..=128 => {
+            33..=128 => {
                 unsafe { KERNEL_HEAP.b128.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
-            0..=512 => {
+            129..=512 => {
                 unsafe { KERNEL_HEAP.b512.get_mut().alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
             _ => core::ptr::null_mut(),
         }
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) -> () {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         match max(layout.align(), layout.size()) {
             0..=32 => unsafe { KERNEL_HEAP.b32.get_mut().dealloc(ptr, layout) },
-            0..=128 => unsafe { KERNEL_HEAP.b128.get_mut().dealloc(ptr, layout) },
-            0..=512 => unsafe { KERNEL_HEAP.b512.get_mut().dealloc(ptr, layout) },
+            33..=128 => unsafe { KERNEL_HEAP.b128.get_mut().dealloc(ptr, layout) },
+            129..=512 => unsafe { KERNEL_HEAP.b512.get_mut().dealloc(ptr, layout) },
             _ => (),
         }
     }
@@ -170,12 +175,14 @@ unsafe impl GlobalAlloc for HeapAllocator {
         new_ptr
     }
 }
-
+/// Logs statistics regarding heap usage
+/// # Safety
+/// This function is not thread safe. It is intended to only be used for logging purposes.
 pub unsafe fn log_allocator() {
     unsafe { KERNEL_HEAP.log() }
 }
 
-pub fn init() -> () {
+pub fn init() {
     call_once!();
     unsafe { KERNEL_HEAP.init() }
 }

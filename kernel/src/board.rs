@@ -9,7 +9,7 @@ extern "C" {
 }
 
 #[allow(dead_code)]
-pub fn wake_all_cores() -> () {
+pub fn wake_all_cores() {
     // Not invalid, but we shouldn't be trying to call this multiple times
     call_once!();
     unsafe {
@@ -22,7 +22,7 @@ pub fn wake_all_cores() -> () {
     aarch64_cpu::asm::sev();
 }
 
-pub fn init() -> () {
+pub fn init() {
     // Must only be initialized once
     call_once!();
     serial().init();

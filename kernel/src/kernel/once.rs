@@ -17,7 +17,7 @@ impl<T> SetOnce<T> {
     /// Sets the value
     ///
     /// Panics if the value is already set
-    pub fn set(&self, value: T) -> () {
+    pub fn set(&self, value: T) {
         assert!(self.inner.set(value).is_ok());
     }
 
@@ -50,7 +50,7 @@ macro_rules! call_once {
 #[macro_export]
 macro_rules! call_once_per_core {
     () => {{
-        use crate::kernel::PerCore;
+        use $crate::kernel::PerCore;
         static IS_CORE_FIRST_INVOCATION: PerCore<bool> = PerCore::new(true);
         assert!(
             IS_CORE_FIRST_INVOCATION.with_current(|is_first| core::mem::replace(is_first, false))

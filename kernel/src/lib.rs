@@ -32,10 +32,8 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
     use core::time::Duration;
 
     let num_loops: u64 = option_env!("LOOP")
-        .map(|loops| u64::from_str_radix(loops, 10))
-        .unwrap_or(Ok(10))
+        .and_then(|v| str::parse(v).ok())
         .unwrap_or(10);
-
     // Timeout thread
     kernel::thread::schedule(thread!(move || {
         use crate::kernel::timer::now;
@@ -67,6 +65,6 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
 
 #[cfg(test)]
 #[no_mangle]
-fn kernel_main() -> () {
+fn kernel_main() {
     test_main();
 }

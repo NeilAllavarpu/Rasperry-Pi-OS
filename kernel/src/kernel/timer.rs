@@ -73,7 +73,7 @@ pub fn now() -> Duration {
 
 /// Pauses execution for at least the given duration, up to rounding errors
 #[allow(dead_code)]
-pub fn wait_at_least(duration: Duration) -> () {
+pub fn wait_at_least(duration: Duration) {
     let target_time: Duration = now() + duration;
 
     // Spin until the desired time is reached
