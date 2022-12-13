@@ -1,12 +1,12 @@
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    use crate::{architecture, log};
+    use crate::{architecture, println};
     let (file, line, column) = match info.location() {
         Some(loc) => (loc.file(), loc.line(), loc.column()),
         _ => ("Unknown file", 0, 0),
     };
 
-    log!(
+    println!(
         "PANIC at {}:{}:{}\n{}",
         file,
         line,

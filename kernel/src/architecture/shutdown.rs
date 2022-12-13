@@ -20,5 +20,5 @@ pub fn shutdown(exit_code: u32) -> ! {
     unsafe {
         kernel::heap::log_allocator();
     }
-    qemu_exit::AArch64::new().exit(exit_code);
+    qemu_exit::AArch64::new().exit(exit_code)
 }

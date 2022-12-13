@@ -9,21 +9,24 @@ KERNEL_BIN        = kernel8.img
 KERNEL_DEBUG_BIN  = kernel8_debug.img
 QEMU_BINARY       = qemu-system-aarch64
 QEMU_MACHINE_TYPE = raspi3
-QEMU_RELEASE_ARGS = -serial stdio -display none -smp 4 -semihosting
+QEMU_ARGS 		  = -serial stdio -display none -smp 4 -semihosting
 QEMU_DEBUG_ARGS   = -serial stdio -display none -smp 4 -semihosting -s -S
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
-LD_SCRIPT_PATH    = $(shell pwd)/src/board
+LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/board
+
+VERBOSE ?= 0
 
 # Export for build.rs.
 export LD_SCRIPT_PATH
 
 # Dependencies
+KERNEL_MANIFEST      = kernel/Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
 KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
-KERNEL_ELF_DEPS = $(shell ls src/**/*)
+KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
 
 # Rust + other build things
 RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
@@ -34,14 +37,19 @@ RUSTFLAGS_DEBUG = -g
 RUSTFLAGS_NODEBUG = --release
 
 RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
-    -D warnings                   \
+    # -D warnings                   \
     -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET)
+COMPILER_ARGS = --target=$(TARGET) --manifest-path $(KERNEL_MANIFEST)
+
+ifeq ($(VERBOSE), 1)
+COMPILER_ARGS += --features=verbose
+endif
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
 CLIPPY_CMD  = cargo clippy $(COMPILER_ARGS)
+TEST_CMD    = cargo test $(COMPILER_ARGS) --release
 OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
@@ -55,10 +63,14 @@ DOCKER_CMD          = docker run -t --rm -v $(shell pwd):$(DOCKER_FOLDER) -w $(D
 DOCKER_CMD_INTERACT = $(DOCKER_CMD) -i
 DOCKER_QEMU  = $(DOCKER_CMD_INTERACT) $(DOCKER_IMAGE)
 DOCKER_TOOLS = $(DOCKER_CMD) $(DOCKER_IMAGE)
+DOCKER_TEST  = $(DOCKER_CMD) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)
 
-.PHONY: all doc qemu clippy clean readelf objdump nm check
+.PHONY: all doc qemu clippy clean readelf objdump nm check tmp test
 
 all: $(KERNEL_BIN)
+
+tmp:
+	$(shell echo $(KERNEL_ELF_DEPS))
 
 # Compile the kernel
 $(KERNEL_ELF): $(KERNEL_ELF_DEPS)
@@ -89,7 +101,7 @@ $(KERNEL_DEBUG_BIN): $(KERNEL_DEBUG_ELF)
 # Running in QEMU
 qemu: $(KERNEL_BIN)
 	$(call color_header, "Launching QEMU")
-	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_RELEASE_ARGS) -kernel $(KERNEL_BIN)
+	@$(DOCKER_QEMU) $(EXEC_QEMU) $(QEMU_ARGS) -kernel $(KERNEL_BIN)
 
 qemu_debug: $(KERNEL_DEBUG_BIN)
 	$(call color_header, "Launching QEMU with debugging...")
@@ -128,3 +140,46 @@ objdump: $(KERNEL_ELF)
 nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
 	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
+
+##------------------------------------------------------------------------------
+## Helpers for unit and integration test targets
+##------------------------------------------------------------------------------
+define KERNEL_TEST_RUNNER
+#!/usr/bin/env bash
+
+    # The cargo test runner seems to change into the crate under test's directory. Therefore, ensure
+    # this script executes from the root.
+    cd $(shell pwd)
+
+    TEST_ELF=$$(echo $$1 | sed -e 's/.*target/target/g')
+    TEST_BINARY=$$(echo $$1.img | sed -e 's/.*target/target/g')
+
+    $(OBJCOPY_CMD) $$TEST_ELF $$TEST_BINARY
+    $(DOCKER_TEST) $(EXEC_TEST_DISPATCH) $(EXEC_QEMU) $(QEMU_ARGS) -kernel $$TEST_BINARY
+endef
+
+export KERNEL_TEST_RUNNER
+
+define test_prepare
+    @mkdir -p target
+    @echo "$$KERNEL_TEST_RUNNER" > target/kernel_test_runner.sh
+    @chmod +x target/kernel_test_runner.sh
+endef
+
+##------------------------------------------------------------------------------
+## Run unit test(s)
+##------------------------------------------------------------------------------
+test_unit:
+	$(call color_header, "Compiling unit tests")
+	$(call test_prepare)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --lib
+
+##------------------------------------------------------------------------------
+## Run integration test(s)
+##------------------------------------------------------------------------------
+test_integration:
+	$(call color_header, "Compiling integration tests")
+	$(call test_prepare)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) $(TEST_ARG)
+
+test: test_unit test_integration

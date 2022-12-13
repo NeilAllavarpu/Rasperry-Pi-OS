@@ -1,16 +1,9 @@
-[package]
-name = "rpi-os"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+
+members = [
+        "libraries/*",
+        "kernel"
+]
 
 [profile.release]
 lto = true
-
-[[bin]]
-name = "kernel"
-path = "src/main.rs"
-
-[dependencies]
-aarch64-cpu = "*"
-qemu-exit = "*"
-tock-registers = "*"

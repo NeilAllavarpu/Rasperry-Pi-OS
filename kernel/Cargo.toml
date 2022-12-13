@@ -1,0 +1,26 @@
+[package]
+name = "rpi-os"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aarch64-cpu = "*"
+qemu-exit = "*"
+tock-registers = "*"
+test-types = { path = "../libraries/test-types" }
+
+[lib]
+name = "libkernel"
+test = true
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+test = false
+
+[dev-dependencies]
+test-macros = { path = "../libraries/test-macros" }
+
+[features]
+default = []
+verbose = []
