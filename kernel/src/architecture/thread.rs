@@ -1,26 +1,30 @@
-use crate::kernel::{self, thread::TCB};
+use crate::kernel::{self, thread::Thread};
 use aarch64_cpu::registers::TPIDR_EL1;
+use alloc::sync::Arc;
 use core::{
     arch::global_asm,
     ptr::{self, Pointee},
 };
 use tock_registers::interfaces::{Readable, Writeable};
 
-/// Returns a mutable reference to the currently running thread
-pub fn me<'a>() -> &'a mut TCB {
-    unsafe { &mut *<*mut TCB>::from_bits(TPIDR_EL1.get().try_into().unwrap()) }
+/// Runs the given closure with the current thread as a parameter
+pub fn me<T, Work: FnOnce(&mut Thread) -> T>(work: Work) -> T {
+    work.call_once(
+        (unsafe { &mut *<*mut Thread>::from_bits(TPIDR_EL1.get().try_into().unwrap()) },),
+    )
 }
 
 /// Sets the currently running thread
 /// # Safety
 /// Only the initialization sequence should call this, using the idle threads
-pub unsafe fn set_me(thread: *mut TCB) {
-    TPIDR_EL1.set(thread.to_bits().try_into().unwrap())
+pub unsafe fn set_me(thread: Arc<Thread>) {
+    // thread.
+    TPIDR_EL1.set(Arc::into_raw(thread).to_bits().try_into().unwrap());
 }
 
 #[no_mangle]
 extern "C" fn thread_trampoline() -> ! {
-    unsafe { me().run() }
+    unsafe { me(|me| me.run()) }
 }
 
 /// Creates a stack appropriate to trampoline start a thread
@@ -44,32 +48,40 @@ extern "C" {
     fn _context_switch(
         data: *mut (),
         metadata: *const (),
-        new_thread: *mut TCB,
-        callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut TCB),
+        new_thread: *mut Thread,
+        callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut Thread),
     );
 }
 
 extern "C" fn invoke_callback<Callback>(
     data_address: *mut (),
     metadata: *const <Callback as Pointee>::Metadata,
-    previous_thread: *mut TCB,
+    previous_thread: *mut Thread,
 ) where
-    Callback: FnMut(*mut TCB),
+    Callback: FnMut(Arc<Thread>),
 {
     unsafe { ptr::from_raw_parts_mut::<Callback>(data_address, *metadata).as_mut() }
         .unwrap()
-        .call_once((previous_thread,))
+        .call_once((unsafe { Arc::from_raw(previous_thread) },))
 }
 
 /// Context switches into the given thread, and invokes the callback after switching threads
-pub fn context_switch<Callback>(new_thread: *mut TCB, mut data: Callback)
+pub fn context_switch<Callback>(new_thread: Arc<Thread>, mut data: Callback)
 where
-    Callback: FnMut(*mut TCB),
+    Callback: FnMut(Arc<Thread>),
 {
-    let me = me();
-    me.runtime += kernel::timer::now() - me.last_started;
-    let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
-        ptr::addr_of_mut!(data).to_raw_parts();
-    unsafe { _context_switch(data, &metadata, new_thread, invoke_callback::<Callback>) }
-    me.last_started = kernel::timer::now()
+    me(|me| {
+        me.runtime += kernel::timer::now() - me.last_started;
+        let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
+            ptr::addr_of_mut!(data).to_raw_parts();
+        unsafe {
+            _context_switch(
+                data,
+                &metadata,
+                Arc::into_raw(new_thread) as *mut Thread,
+                invoke_callback::<Callback>,
+            )
+        }
+        me.last_started = kernel::timer::now()
+    });
 }

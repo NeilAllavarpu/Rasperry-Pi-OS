@@ -26,22 +26,22 @@ macro_rules! println {
 macro_rules! log {
     ($string:expr) => ({
         use core::time::Duration;
-        let timestamp: Duration = crate::kernel::timer::now();
+        let timestamp: Duration = $crate::kernel::timer::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $string),
-            crate::architecture::thread::me().id,
+            $crate::architecture::thread::me(|me| me.id),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
         ));
     });
     ($format_string:expr, $($arg:tt)*) => ({
         use core::time::Duration;
-        let timestamp: Duration = crate::kernel::timer::now();
+        let timestamp: Duration = $crate::kernel::timer::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $format_string),
-            crate::architecture::thread::me().id,
+            $crate::architecture::thread::me(|me| me.id),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
             $($arg)*

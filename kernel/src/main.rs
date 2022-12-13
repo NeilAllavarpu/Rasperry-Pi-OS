@@ -12,6 +12,7 @@
 #![feature(ptr_to_from_bits)]
 #![feature(ptr_metadata)]
 #![feature(alloc_error_handler)]
+#![feature(extend_one)]
 #![feature(default_alloc_error_handler)]
 #![feature(pointer_byte_offsets)]
 #![forbid(unsafe_op_in_unsafe_fn)]
