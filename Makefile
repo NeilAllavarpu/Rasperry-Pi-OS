@@ -14,7 +14,7 @@ QEMU_DEBUG_ARGS   = -serial stdio -display none -smp 4 -semihosting -s -S
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
-LD_SCRIPT_PATH    = $(shell pwd)/kernel/src/board
+LD_SCRIPT_PATH    = $(shell pwd)/src/board
 
 VERBOSE ?= 0
 
@@ -22,7 +22,7 @@ VERBOSE ?= 0
 export LD_SCRIPT_PATH
 
 # Dependencies
-KERNEL_MANIFEST      = kernel/Cargo.toml
+KERNEL_MANIFEST      = Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
 KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
@@ -182,4 +182,4 @@ test_integration:
 	$(call test_prepare)
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) $(TEST_ARG)
 
-test: test_unit test_integration
+test: test_integration

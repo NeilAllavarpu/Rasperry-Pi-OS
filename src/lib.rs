@@ -28,7 +28,7 @@ pub mod board;
 pub mod kernel;
 
 /// The default runner for unit tests.
-pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
+pub fn test_runner(tests: &[&TestCase]) -> ! {
     use core::time::Duration;
 
     let num_loops: u64 = option_env!("LOOP")
@@ -54,13 +54,33 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
             // Run the actual test.
-            (test.test_func)();
+            (test.test)();
 
             println!(".... PASSED")
         }
     }
 
     architecture::shutdown(0);
+}
+
+#[macro_export]
+macro_rules! add_test {
+    ($name: ident, $test: block) => {
+        #[test_case]
+        #[allow(incorrect_ident_case)]
+        const $name: $crate::TestCase = $crate::TestCase {
+            name: stringify!($name),
+            test: || $test,
+        };
+    };
+}
+
+pub struct TestCase {
+    /// Name of the test.
+    pub name: &'static str,
+
+    /// Function pointer to the test.
+    pub test: fn(),
 }
 
 #[cfg(test)]

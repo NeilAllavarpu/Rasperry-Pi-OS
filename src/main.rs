@@ -18,6 +18,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 #![feature(pointer_is_aligned)]
 #![reexport_test_harness_main = "test_main"]
+#![test_runner(_test_runner)]
 #![feature(custom_test_frameworks)]
 #![warn(clippy::correctness)]
 #![warn(clippy::pedantic)]
@@ -27,6 +28,8 @@
 #![warn(clippy::style)]
 
 extern crate alloc;
+
+fn _test_runner(_: &[&()]) {}
 
 mod architecture;
 mod board;

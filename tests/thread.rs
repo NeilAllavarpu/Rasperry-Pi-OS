@@ -8,16 +8,14 @@
 extern crate alloc;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU64, Ordering};
-use libkernel::{kernel, thread};
-use test_macros::kernel_test;
+use libkernel::{add_test, kernel, thread};
 
 #[no_mangle]
 fn kernel_main() {
     test_main()
 }
 
-#[kernel_test]
-fn runs_basic_threads() {
+add_test!(runs_basic_threading, {
     const NUM_THREADS: u64 = 16;
     let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
@@ -33,4 +31,11 @@ fn runs_basic_threads() {
     }
 
     assert!(counter.load(Ordering::Acquire) == NUM_THREADS);
-}
+});
+
+// const t: TestCase = TestCase {
+//     name: "Runs basic threading",
+//     test: runs_basic_threads,
+// };
+
+// fn runs_basic_threads() {}
