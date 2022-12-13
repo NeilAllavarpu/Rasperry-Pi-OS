@@ -31,13 +31,16 @@ pub mod kernel;
 pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
     use core::time::Duration;
 
-    const NUM_LOOPS: u64 = 10;
+    let num_loops: u64 = option_env!("LOOP")
+        .map(|loops| u64::from_str_radix(loops, 10))
+        .unwrap_or(Ok(10))
+        .unwrap_or(10);
 
     // Timeout thread
-    use crate::kernel::timer::now;
-    kernel::thread::schedule(kernel::thread::TCB::new(|| {
+    kernel::thread::schedule(thread!(move || {
+        use crate::kernel::timer::now;
         let start = now();
-        let timeout: Duration = Duration::from_secs(NUM_LOOPS * 5);
+        let timeout: Duration = Duration::from_secs(num_loops);
 
         loop {
             assert!(now() - start < timeout, "Test timed out");
@@ -49,8 +52,8 @@ pub fn test_runner(tests: &[&test_types::UnitTest]) -> ! {
     // println!()
 
     for test in tests {
-        for i in 1..=NUM_LOOPS {
-            println!("[{}/{}] {}:", i, NUM_LOOPS, test.name);
+        for i in 1..=num_loops {
+            println!("[{}/{}] {}:", i, num_loops, test.name);
 
             // Run the actual test.
             (test.test_func)();

@@ -15,7 +15,7 @@ pub struct TCB {
     sp: *mut u128,
     pub runtime: Duration,
     pub last_started: Duration,
-    pub work: fn() -> (),
+    pub work: Box<dyn FnMut() -> ()>,
 }
 struct ReadyThreads(Spinlock<BinaryHeap<Box<TCB>>>);
 
@@ -31,19 +31,33 @@ fn get_stack() -> *mut u128 {
     unsafe { architecture::thread::set_up_stack(sp.byte_add(STACK_SIZE)) }
 }
 
+#[macro_export]
+macro_rules! thread {
+    ($work: ident) => {
+        crate::kernel::thread::TCB::new_from_function($work)
+    };
+    ($work: expr) => {
+        crate::kernel::thread::TCB::new(alloc::boxed::Box::new($work))
+    };
+}
+
 impl TCB {
-    pub fn new(work: fn() -> ()) -> *mut Self {
+    pub fn new(work: Box<dyn FnMut() -> ()>) -> *mut Self {
         ACTIVE_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
         Box::into_raw(Box::new(Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
-            work,
+            work: Box::new(work),
             runtime: Duration::ZERO,
             last_started: Duration::default(),
             sp: get_stack(),
         }))
     }
 
-    pub fn run(&self) -> ! {
+    pub fn new_from_function(work: fn() -> ()) -> *mut Self {
+        Self::new(Box::new(work))
+    }
+
+    pub fn run(&mut self) -> ! {
         (self.work)();
         self.stop();
     }
@@ -121,6 +135,7 @@ pub fn schedule(thread: *mut TCB) -> () {
     sev();
 }
 
+#[allow(dead_code)]
 pub fn switch() {
     match READY_THREADS.get().get() {
         Some(thread) => {
@@ -135,10 +150,10 @@ pub fn switch() {
 pub fn init() -> () {
     READY_THREADS.set(ReadyThreads::new());
     IDLE_THREADS.set(PerCore::new_from_array([
-        (TCB::new(idle_loop)),
-        (TCB::new(idle_loop)),
-        (TCB::new(idle_loop)),
-        (TCB::new(idle_loop)),
+        thread!(idle_loop),
+        thread!(idle_loop),
+        thread!(idle_loop),
+        thread!(idle_loop),
     ]));
     // Don't count the idle threads as active threads
     ACTIVE_THREAD_COUNT.store(0, Ordering::Relaxed);

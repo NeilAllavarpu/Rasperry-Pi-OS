@@ -1,4 +1,4 @@
-use crate::{architecture, board, call_once, call_once_per_core, kernel, log};
+use crate::{architecture, board, call_once, call_once_per_core, kernel, log, thread};
 
 extern "Rust" {
     /// The `kernel_init()` for unit tests.
@@ -25,7 +25,7 @@ pub extern "C" fn init() -> ! {
         architecture::CONFIG.get().log();
         kernel::thread::init();
 
-        kernel::thread::schedule(kernel::thread::TCB::new(|| unsafe { kernel_main() }));
+        kernel::thread::schedule(thread!(|| unsafe { kernel_main() }));
 
         board::wake_all_cores();
     }
