@@ -1,4 +1,4 @@
-use crate::{architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
+use crate::{add_test, architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::barrier,
     registers::{CurrentEL, DAIF, SCTLR_EL1, VBAR_EL1},
@@ -74,3 +74,46 @@ impl Drop for Guard {
         DAIF.set(self.daif);
     }
 }
+
+add_test!(guard_preserves_interrupt_state, {
+    assert!(
+        DAIF.matches_all(
+            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
+        ),
+        "Interrupts should be enabled when a thread runs, by default"
+    );
+    let guard = Guard::new();
+    assert!(
+        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
+        "Interrupts should be disabled while a guard is active"
+    );
+    drop(guard);
+    assert!(
+        DAIF.matches_all(
+            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
+        ),
+        "Dropping all guards should re-enable interrupts"
+    );
+    let guard1 = Guard::new();
+    assert!(
+        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
+        "Interrupts should be disabled while a guard is active"
+    );
+    let guard2 = Guard::new();
+    assert!(
+        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
+        "Interrupts should be disabled while a guard is active"
+    );
+    drop(guard2);
+    assert!(
+        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
+        "Interrupts should remain disabled while a guard is active, even if another guard is dropped"
+    );
+    drop(guard1);
+    assert!(
+        DAIF.matches_all(
+            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
+        ),
+        "Dropping all guards should re-enable interrupts"
+    );
+});

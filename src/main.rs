@@ -59,3 +59,9 @@ mod kernel;
 #[no_mangle]
 /// The default main sequence
 pub fn kernel_main() {}
+
+/// Dummy macro for kernel tests, replaced by `lib.rs` when tests
+#[macro_export]
+macro_rules! add_test {
+    ($name: ident, $test: block) => {};
+}

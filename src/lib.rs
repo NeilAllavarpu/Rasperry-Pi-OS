@@ -32,7 +32,7 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
     use crate::kernel::time::now;
     use core::time::Duration;
 
-    const DEFAULT_LOOPS: u64 = 10;
+    const DEFAULT_LOOPS: u64 = 16;
     let num_loops: u64 = option_env!("LOOP")
         .and_then(|v| str::parse(v).ok())
         .unwrap_or(DEFAULT_LOOPS);
@@ -73,7 +73,6 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
 macro_rules! add_test {
     ($name: ident, $test: block) => {
         #[test_case]
-        #[allow(incorrect_ident_case)]
         const $name: $crate::TestCase = $crate::TestCase {
             name: stringify!($name),
             test: || $test,
