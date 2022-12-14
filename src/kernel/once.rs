@@ -44,9 +44,9 @@ unsafe impl<T: Send> Send for SetOnce<T> {}
 #[macro_export]
 macro_rules! call_once {
     () => {{
-        use core::sync::atomic::{AtomicBool, Ordering::AcqRel};
+        use core::sync::atomic::{AtomicBool, Ordering};
         static IS_FIRST_INVOCATION: AtomicBool = AtomicBool::new(false);
-        assert!(!IS_FIRST_INVOCATION.swap(true, AcqRel))
+        assert!(!IS_FIRST_INVOCATION.swap(true, Ordering::Relaxed))
     }};
 }
 

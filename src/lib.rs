@@ -2,27 +2,26 @@
 
 #![no_main]
 #![no_std]
-#![feature(format_args_nl)]
-#![feature(panic_info_message)]
-#![feature(const_option)]
-#![feature(once_cell)]
-#![feature(strict_provenance_atomic_ptr)]
-#![feature(result_option_inspect)]
-#![feature(alloc_error_handler)]
-#![feature(fn_traits)]
-#![feature(ptr_to_from_bits)]
-#![feature(linkage)]
-#![feature(ptr_metadata)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
+#![feature(integer_atomics)]
+#![feature(fn_traits)]
+#![feature(format_args_nl)]
+#![feature(once_cell)]
+#![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
-#![forbid(unsafe_op_in_unsafe_fn)]
-// etc
+#![feature(ptr_metadata)]
+#![feature(ptr_to_from_bits)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(test_runner)]
 
 extern crate alloc;
 
+use alloc::sync::Arc;
+use core::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 pub mod architecture;
 pub mod board;
 pub mod kernel;
@@ -30,36 +29,34 @@ pub mod kernel;
 /// The default runner for unit tests.
 pub fn test_runner(tests: &[&TestCase]) -> ! {
     use crate::kernel::time::now;
-    use core::time::Duration;
 
     const DEFAULT_LOOPS: u64 = 16;
     let num_loops: u64 = option_env!("LOOP")
         .and_then(|v| str::parse(v).ok())
         .unwrap_or(DEFAULT_LOOPS);
 
-    // Timeout thread
-    kernel::thread::schedule(thread!(move || {
-        let start = now();
-        let timeout: Duration = Duration::from_secs(num_loops);
-
-        loop {
-            assert!(now() - start < timeout, "Test timed out");
-            kernel::thread::switch();
-        }
-    }));
-
-    // This line will be printed as the test headers
-    println!("Running {} tests", tests.len());
-    // println!()
-
     for test in tests {
+        let running = Arc::new(AtomicU64::new(1));
         for i in 1..=num_loops {
+            let running_ = Arc::clone(&running);
+            let i_ = i;
+            let timeout = test.timeout;
+
+            // Timeout thread
+            kernel::thread::schedule(thread!(move || {
+                let start = now();
+                while running_.load(Ordering::Relaxed) == i_ {
+                    assert!(now() - start < timeout, "Test timed out");
+                    kernel::thread::switch();
+                }
+            }));
+
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
             let start = now();
-            // Run the actual test.
             (test.test)();
             let end = now();
+            running.fetch_add(1, Ordering::Relaxed);
 
             println!(".... PASSED: {:#?}", end - start);
         }
@@ -76,6 +73,15 @@ macro_rules! add_test {
         const $name: $crate::TestCase = $crate::TestCase {
             name: stringify!($name),
             test: || $test,
+            timeout: core::time::Duration::from_secs(1),
+        };
+    };
+    ($name: ident, $test: block, $timeout: expr) => {
+        #[test_case]
+        const $name: $crate::TestCase = $crate::TestCase {
+            name: stringify!($name),
+            test: || $test,
+            timeout: $timeout,
         };
     };
 }
@@ -87,6 +93,9 @@ pub struct TestCase {
 
     /// Function pointer to the test.
     pub test: fn(),
+
+    /// Timeout for the test, defaults to 1 second
+    pub timeout: Duration,
 }
 
 #[cfg(test)]

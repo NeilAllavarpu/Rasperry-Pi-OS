@@ -109,6 +109,7 @@ impl FixedBlockHeap {
 /// Number of blocks to use
 const NUM_BLOCKS: usize = 3;
 /// Size of individual blocks
+#[allow(dead_code)]
 const SIZES: [usize; NUM_BLOCKS] = [64, 256, 1024];
 /// The general purpose heap allocator for the kernel
 struct HeapAllocator {

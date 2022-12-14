@@ -8,8 +8,8 @@ use core::{
 };
 
 /// The number of nanoseconds per second
-const NANOSEC_PER_SEC: NonZeroU32 =
-    NonZeroU32::new(1_000_000_000).expect("Number of nanoseconds per second should not overflow");
+#[allow(clippy::undocumented_unsafe_blocks)]
+const NANOSEC_PER_SEC: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1_000_000_000) };
 
 /// Encloses a clock tick value
 pub struct Tick {

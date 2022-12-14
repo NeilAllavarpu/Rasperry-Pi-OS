@@ -40,7 +40,7 @@ impl<T> kernel::Mutex for SpinLock<T> {
 
     fn lock(&self) -> kernel::MutexGuard<Self> {
         let mut guard = architecture::exception::Guard::new();
-        while self.is_locked.swap(true, Ordering::AcqRel) {
+        while self.is_locked.swap(true, Ordering::Acquire) {
             drop(guard);
             wfe();
             guard = architecture::exception::Guard::new();

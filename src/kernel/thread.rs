@@ -38,7 +38,7 @@ struct ReadyThreads {
 /// The ID of the next thread created
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 /// The number of currently running threads
-static ACTIVE_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+pub static ACTIVE_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// The global ready thread list
 static READY_THREADS: SetOnce<ReadyThreads> = SetOnce::new();
 /// The idle cores, one per core
@@ -47,7 +47,7 @@ static IDLE_THREADS: SetOnce<PerCore<Arc<Thread>>> = SetOnce::new();
 /// TODO: Convert this to a dynamic size via paging
 const STACK_SIZE: usize = 0x2000;
 /// The layout for the stack
-// SAFETY: This should be a valid layout
+#[allow(clippy::undocumented_unsafe_blocks)]
 const STACK_LAYOUT: Layout = unsafe { Layout::from_size_align_unchecked(STACK_SIZE, STACK_SIZE) };
 /// The pool of thread stacks
 static mut STACKS: FixedBlockHeap = FixedBlockHeap::new(STACK_SIZE);
@@ -79,10 +79,13 @@ impl Thread {
     /// Creates a new thread, with the given closure as its execution path
     pub fn new(work: Box<dyn FnMut()>) -> Arc<Self> {
         let active_count = ACTIVE_THREAD_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut threads = READY_THREADS.threads.lock();
-        let curr_len = threads.len();
-        if curr_len < active_count {
-            threads.reserve(active_count - curr_len);
+        {
+            let mut threads = READY_THREADS.threads.lock();
+            let curr_capacity = threads.capacity();
+            if curr_capacity < active_count {
+                let len = threads.len();
+                threads.reserve(curr_capacity * 2 - len);
+            }
         }
         let (allocated_sp, sp) = get_stack();
 

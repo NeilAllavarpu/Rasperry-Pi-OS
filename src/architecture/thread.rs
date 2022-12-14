@@ -5,7 +5,6 @@ use crate::{
 use aarch64_cpu::registers::TPIDR_EL1;
 use alloc::sync::Arc;
 use core::{
-    any::Any,
     arch::global_asm,
     ptr::{self, addr_of, Pointee},
 };
