@@ -65,7 +65,7 @@ extern "C" {
     #[allow(improper_ctypes)]
     fn _context_switch(
         data: *mut (),
-        metadata: *const dyn Any,
+        metadata: usize,
         new_thread: *mut Thread,
         callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut Thread),
     );
@@ -106,7 +106,7 @@ where
             #[allow(clippy::as_conversions)]
             _context_switch(
                 data,
-                addr_of!(metadata) as *const dyn Any,
+                addr_of!(metadata).to_bits(),
                 Arc::into_raw(new_thread).cast_mut(),
                 invoke_callback::<Callback>,
             );

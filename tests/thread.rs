@@ -16,14 +16,18 @@ fn kernel_main() {
 }
 
 add_test!(runs_basic_threading, {
-    const NUM_THREADS: u64 = 30;
+    const NUM_THREADS: u64 = 1 << 16;
+    const MAX_ACTIVE: u64 = 1 << 8;
     let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
-    for _ in 0..NUM_THREADS {
+    for n in 0..NUM_THREADS {
         let counter_ = counter.clone();
         kernel::thread::schedule(thread!(move || {
             assert!(counter_.fetch_add(1, Ordering::Acquire) < NUM_THREADS);
         }));
+        if n - counter.load(Ordering::Acquire) > MAX_ACTIVE {
+            kernel::thread::switch()
+        }
     }
 
     while counter.load(Ordering::Acquire) < NUM_THREADS {

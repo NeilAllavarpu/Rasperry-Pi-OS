@@ -50,7 +50,7 @@ const STACK_SIZE: usize = 0x2000;
 // SAFETY: This should be a valid layout
 const STACK_LAYOUT: Layout = unsafe { Layout::from_size_align_unchecked(STACK_SIZE, STACK_SIZE) };
 /// The pool of thread stacks
-static mut STACKS: FixedBlockHeap<STACK_SIZE> = FixedBlockHeap::new();
+static mut STACKS: FixedBlockHeap = FixedBlockHeap::new(STACK_SIZE);
 /// Gets a prepared stack for a thread to use
 fn get_stack() -> (*mut u8, *mut u128) {
     #[allow(clippy::as_conversions)]
