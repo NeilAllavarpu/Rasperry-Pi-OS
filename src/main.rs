@@ -21,19 +21,40 @@
 #![test_runner(_test_runner)]
 #![feature(custom_test_frameworks)]
 #![warn(clippy::correctness)]
+#![feature(stmt_expr_attributes)]
 #![warn(clippy::pedantic)]
 #![warn(clippy::suspicious)]
 #![warn(clippy::complexity)]
 #![warn(clippy::perf)]
 #![warn(clippy::style)]
+#![warn(clippy::restriction)]
+#![allow(clippy::arithmetic_side_effects)]
+#![allow(clippy::implicit_return)]
+#![allow(clippy::integer_arithmetic)]
+#![allow(clippy::panic)]
+#![allow(clippy::unreachable)]
+#![allow(clippy::expect_used)]
+#![allow(clippy::separated_literal_suffix)]
+#![allow(clippy::missing_trait_methods)]
+#![allow(clippy::integer_division)]
+#![allow(clippy::single_char_lifetime_names)]
+#![allow(clippy::partial_pub_fields)]
+#![allow(clippy::pub_use)]
+#![allow(clippy::self_named_module_files)]
+#![allow(clippy::default_numeric_fallback)]
 
 extern crate alloc;
 
+/// Dummy function for rust-analyzer issues
 fn _test_runner(_: &[&()]) {}
 
+/// Architecture-specific implementations
 mod architecture;
+/// Board-specific implementaitons
 mod board;
+/// Generic implementations
 mod kernel;
 
 #[no_mangle]
+/// The default main sequence
 pub fn kernel_main() {}

@@ -36,7 +36,7 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
         .unwrap_or(10);
     // Timeout thread
     kernel::thread::schedule(thread!(move || {
-        use crate::kernel::timer::now;
+        use crate::kernel::time::now;
         let start = now();
         let timeout: Duration = Duration::from_secs(num_loops);
 
@@ -63,6 +63,7 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
     architecture::shutdown(0);
 }
 
+/// Registers a test to the given name
 #[macro_export]
 macro_rules! add_test {
     ($name: ident, $test: block) => {
@@ -75,6 +76,7 @@ macro_rules! add_test {
     };
 }
 
+/// Represents a test to run
 pub struct TestCase {
     /// Name of the test.
     pub name: &'static str,

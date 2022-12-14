@@ -17,12 +17,16 @@ register_structs! {
     }
 }
 
+/// Memory mapped IO wrapper
 pub struct Mmio<T> {
+    /// Beginning address of the MMIO region
     start_addr: *mut T,
 }
 
 impl<T> Mmio<T> {
-    /// Create an instance.
+    /// Creates an MMIO wrapper at the given location
+    /// # Safety
+    /// `start_addr` must be correct, and should not be reused by anything else
     pub const unsafe fn new(start_addr: *mut T) -> Self {
         Self { start_addr }
     }
@@ -32,6 +36,7 @@ impl<T> ops::Deref for Mmio<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
+        // SAFETY: By assumption, this dereference should be safe
         unsafe { &*self.start_addr }
     }
 }
@@ -39,11 +44,14 @@ impl<T> ops::Deref for Mmio<T> {
 /// Abstraction for the associated MMIO registers.
 type Registers = Mmio<RegisterBlock>;
 
+/// Inner representation of the UART
 struct UartInner {
+    /// The UART registers, memory mapped
     registers: Registers,
 }
 /// Representation of the UART.
 pub struct Uart {
+    /// The protected UART
     inner: SpinLock<UartInner>,
 }
 
@@ -54,10 +62,12 @@ impl UartInner {
     /// This includes not initializing the UART multiple times
     pub const unsafe fn new(mmio_start_addr: *mut RegisterBlock) -> Self {
         Self {
+            // SAFETY: By assumption, the start address is correct
             registers: unsafe { Registers::new(mmio_start_addr) },
         }
     }
 
+    /// Initializes the UART
     pub fn init(&mut self) {}
 
     /// Sends a byte across the UART
@@ -69,7 +79,11 @@ impl UartInner {
     /// Reads a byte from the UART, if available
     fn read_byte(&mut self) -> Option<u8> {
         // Read one character.
-        Some(self.registers.DR.get().try_into().unwrap())
+        Some(
+            (self.registers.DR.get() & 0xFF)
+                .try_into()
+                .expect("Mask should prevent overflow"),
+        )
     }
 }
 
@@ -90,28 +104,37 @@ impl Uart {
     /// This includes not initializing the UART multiple times
     pub const unsafe fn new(start_address: *mut RegisterBlock) -> Self {
         Self {
-            inner: SpinLock::new(unsafe { UartInner::new(start_address) }),
+            inner: SpinLock::new(
+                // SAFETY: By assumption, the start address must be correct and proper
+                unsafe { UartInner::new(start_address) },
+            ),
         }
     }
 
     /// Initializes the UART
     pub fn init(&self) {
         call_once!();
-        self.inner.lock(UartInner::init);
+        self.inner.lock().init();
     }
 }
 
 impl kernel::Serial for Uart {
     fn write_fmt(&self, args: core::fmt::Arguments) {
-        _ = self.inner.lock(|inner| inner.write_fmt(args));
+        self.inner
+            .lock()
+            .write_fmt(args)
+            .expect("Writing to the UART should not fail");
     }
 
     fn read_byte(&self) -> Option<u8> {
-        self.inner.lock(UartInner::read_byte)
+        self.inner.lock().read_byte()
     }
 }
 
 /// The system-wide UART
+// Safety: This starting address should be correct for the Raspberry Pi 3, according to its specifications
+#[allow(clippy::undocumented_unsafe_blocks)] // Lint not working properly here
+#[allow(clippy::as_conversions)] // Lint not working properly here
 static UART: Uart = unsafe { Uart::new(0x3F20_1000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection

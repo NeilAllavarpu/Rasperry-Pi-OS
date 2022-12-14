@@ -1,4 +1,4 @@
-use crate::{call_once_per_core, kernel::exception::PrivilegeLevel};
+use crate::{architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::barrier,
     registers::{CurrentEL, DAIF, SCTLR_EL1, VBAR_EL1},
@@ -9,7 +9,7 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 core::arch::global_asm!(include_str!("exception.s"));
 
 /// Exception level
-pub fn exception_level() -> PrivilegeLevel {
+pub fn el() -> PrivilegeLevel {
     match CurrentEL.read_as_enum(CurrentEL::EL) {
         Some(CurrentEL::EL::Value::EL2) => PrivilegeLevel::Hypervisor,
         Some(CurrentEL::EL::Value::EL1) => PrivilegeLevel::Kernel,
@@ -18,6 +18,7 @@ pub fn exception_level() -> PrivilegeLevel {
     }
 }
 
+/// Initializes exception handlers
 pub fn init() {}
 
 /// Ready exception handling by setting the exception vector base address register.
@@ -27,7 +28,10 @@ pub fn per_core_init() {
     }
     call_once_per_core!();
 
-    VBAR_EL1.set(unsafe { _exception_vector.get().to_bits().try_into().unwrap() });
+    VBAR_EL1.set(architecture::usize_to_u64(
+        // SAFETY: the exception vector is defined in exception.S
+        unsafe { _exception_vector.get() }.to_bits(),
+    ));
 
     // Force VBAR update to complete before next instruction.
     barrier::isb(barrier::SY);
@@ -48,22 +52,39 @@ pub fn enable() {
     SCTLR_EL1.modify(SCTLR_EL1::A::Enable);
 }
 
-pub struct Masks {
-    prior: u64,
+/// Stores the mask state of exceptions at some point in time
+pub struct Guard {
+    /// The mask states
+    daif: u64,
+    /// For debug purposes
+    should_drop: bool,
 }
 
-/// Disables interrupts
-/// # Safety
-/// Must be paired with a `restore` to ensure that the interrupt state is preserved correctly
-pub unsafe fn disable() -> Masks {
-    let state = Masks { prior: DAIF.get() };
-    DAIF.set(0);
-    state
+impl Guard {
+    /// Creates a default mask state that should not be used directly
+    /// # Safety
+    /// This value should never be properly used: it is intended solely as a default
+    pub const unsafe fn default() -> Self {
+        Self {
+            daif: 0,
+            should_drop: false,
+        }
+    }
+
+    /// C
+    pub fn new() -> Self {
+        let guard = Self {
+            daif: DAIF.get(),
+            should_drop: true,
+        };
+        DAIF.set(0);
+        guard
+    }
 }
 
-/// Re-enables interrupts after having been disabled
-/// # Safety
-/// The given interrupt state must be from the return value of the most recent `disable` on this thread
-pub unsafe fn restore(state: &Masks) {
-    DAIF.set(state.prior);
+impl Drop for Guard {
+    fn drop(&mut self) {
+        assert!(self.should_drop);
+        DAIF.set(self.daif);
+    }
 }

@@ -1,46 +1,31 @@
+use crate::architecture;
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, Ordering};
 
+/// The maximum possible number of cores supported
 const MAX_CORES: usize = 4;
 
-struct PerCoreEntry<T> {
-    is_available: AtomicBool,
-    value: T,
-}
-
-impl<T> PerCoreEntry<T> {
-    const fn new(initial: T) -> Self {
-        Self {
-            is_available: AtomicBool::new(true),
-            value: initial,
-        }
-    }
-}
-
 /// Provides access to a list of items per-core
-pub struct PerCoreInner<T> {
-    data: [PerCoreEntry<T>; MAX_CORES],
+struct PerCoreInner<T> {
+    /// The underlying data
+    data: [T; MAX_CORES],
 }
 
 impl<T: Copy> PerCoreInner<T> {
+    /// Creates a new `PerCore` by copying the given value
     pub const fn new_copy(initial: T) -> Self {
         Self {
             // TODO: Is there a better way to initialize this without copy-paste?
-            data: [
-                PerCoreEntry::new(initial),
-                PerCoreEntry::new(initial),
-                PerCoreEntry::new(initial),
-                PerCoreEntry::new(initial),
-            ],
+            data: [initial; 4],
         }
     }
 }
 
 impl<T> PerCoreInner<T> {
+    /// Creates a new `PerCore` from the initialization array
     pub fn new_from_array(initial: [T; MAX_CORES]) -> Self {
         Self {
             // TODO: Is there a better way to initialize this without copy-paste?
-            data: initial.map(PerCoreEntry::new),
+            data: initial,
         }
     }
 
@@ -50,20 +35,17 @@ impl<T> PerCoreInner<T> {
     /// Prevents the current execution from being switched to another core
     /// while using the core's value
     pub fn with_current<'a, R>(&'a mut self, f: impl FnOnce(&'a mut T) -> R) -> R {
-        let core_id: usize = crate::architecture::machine::core_id().into();
-        assert!(core_id < MAX_CORES);
-        let entry: &mut PerCoreEntry<T> = &mut self.data[core_id];
-        // make sure the entry is not already in use, and claim it
-        assert!(entry.is_available.swap(false, Ordering::AcqRel));
-        let result: R = f(&mut entry.value);
-        // release the entry
-        entry.is_available.store(true, Ordering::Release);
+        let result: R = f.call_once((self
+            .data
+            .get_mut(usize::from(architecture::machine::core_id()))
+            .expect("Core ID was out of bounds"),));
         result
     }
 }
 
 /// Provides access to a list of items per-core
 pub struct PerCore<T> {
+    /// The interior PerCore object
     inner: UnsafeCell<PerCoreInner<T>>,
 }
 
@@ -82,6 +64,7 @@ impl<T> PerCore<T> {
     /// Prevents the current execution from being switched to another core
     /// while using the core's value
     pub fn with_current<'a, R>(&'a self, f: impl FnOnce(&'a mut T) -> R) -> R {
+        // SAFETY:
         unsafe { &mut *self.inner.get() }.with_current(f)
     }
 }
@@ -96,5 +79,11 @@ impl<T: Copy> PerCore<T> {
     }
 }
 
+// SAFETY: Because objects are only accessed one core at a time, and are
+// non-preemptible while doing so, only one thread can access a given element
+// at any time, so mutual exclusion is enforced
 unsafe impl<T> Send for PerCore<T> {}
+// SAFETY: Because objects are only accessed one core at a time, and are
+// non-preemptible while doing so, only one thread can access a given element
+// at any time, so mutual exclusion is enforced
 unsafe impl<T> Sync for PerCore<T> {}

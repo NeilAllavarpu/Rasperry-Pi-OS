@@ -3,26 +3,31 @@ use tock_registers::{interfaces::Readable, register_bitfields};
 
 use crate::log;
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_el0_sync() {
     panic!("Synchronous exception taken with SP_EL0");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_el0_irq() {
     panic!("IRQ taken with SP_EL0");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_el0_fiq() {
     panic!("FIQ taken with SP_EL0");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_el0_other() {
     panic!("Miscellaneous exception taken with SP_EL0");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_elx_sync() {
     match ESR_EL1.read_as_enum(ESR_EL1::EC) {
@@ -52,6 +57,7 @@ register_bitfields![u64, DataAbortISS [
     ]
 ]];
 
+/// Handler for an Instruction Abort
 fn handle_instruction_abort() {
     log!(
         "Instruction Abort exception, taken from the current EL: {:b}",
@@ -82,6 +88,7 @@ fn handle_instruction_abort() {
     panic!("Unable to handle exception");
 }
 
+/// Handler for a Data Abort
 fn handle_data_abort() {
     log!(
         "Data Abort exception, taken from the current EL: {:b}",
@@ -111,56 +118,67 @@ fn handle_data_abort() {
     panic!("Unable to handle exception");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_elx_irq() {
     panic!("IRQ taken with SP_ELX");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_elx_fiq() {
     panic!("FIQ taken with SP_ELX");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn curr_elx_other() {
     panic!("Miscellaneous exception taken with SP_ELX");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_sync_64() {
     panic!("Synchronous exception taken from lower EL, in 64-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_irq_64() {
     panic!("IRQ taken from lower EL, in 64-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_fiq_64() {
     panic!("FIQ taken from lower EL, in 64-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_other_64() {
     panic!("Miscellaneous exception taken from lower EL, in 64-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_sync_32() {
     panic!("Synchronous exception taken from lower EL, in 32-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_irq_32() {
     panic!("IRQ taken from lower EL, in 32-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_fiq_32() {
     panic!("FIQ taken from lower EL, in 32-bit");
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
 #[no_mangle]
 extern "C" fn lower_el_other_32() {
     panic!("Miscellaneous exception taken from lower EL, in 32-bit");

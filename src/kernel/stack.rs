@@ -1,6 +1,6 @@
-use alloc::boxed::Box;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
+/// Trait for items that can be put into `Stack`s or `BoxStack`s
 pub trait Stackable {
     /// Sets the next pointer, when in the stack
     /// Undefined behavior if called manually
@@ -16,6 +16,7 @@ pub trait Stackable {
 /// A lock-free thread-safe linked-list intrusive stack
 /// DOES NOT DEAL PROPERLY WITH DROPPING
 pub struct Stack<T: Stackable> {
+    /// The top of the stack
     top: AtomicPtr<T>,
 }
 
@@ -31,45 +32,44 @@ impl<T: Stackable> Stack<T> {
     pub fn push(&self, value: &mut T) {
         let mut top_ptr = self.top.load(Ordering::Relaxed);
         loop {
+            // SAFETY: This is the only valid place to use this method
             unsafe { value.set_next(top_ptr) }
             let previous_top = self.top.compare_exchange_weak(
                 top_ptr,
                 value,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
+                Ordering::Release,
+                Ordering::Acquire,
             );
 
-            if previous_top.is_ok() {
+            if let Err(next_top) = previous_top {
+                top_ptr = next_top;
+            } else {
                 break;
             }
-
-            top_ptr = previous_top.unwrap_err();
         }
     }
 
     /// Removes the first element from the top of the stack
     pub fn pop(&self) -> Option<&mut T> {
-        let mut top_ptr = self.top.load(Ordering::Relaxed);
+        let mut top = self.top.load(Ordering::Acquire);
         loop {
-            if top_ptr.is_null() {
+            // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
+            if let Some(previous_top) = unsafe { top.as_mut() } {
+                let exchange_result = self.top.compare_exchange_weak(
+                    top,
+                    previous_top.read_next(),
+                    Ordering::Relaxed,
+                    Ordering::Acquire,
+                );
+
+                if let Err(next_top) = exchange_result {
+                    top = next_top;
+                } else {
+                    return Some(previous_top);
+                }
+            } else {
                 return None;
             }
-
-            let previous_top = self.top.compare_exchange_weak(
-                top_ptr,
-                // Assumption: Since `top_ptr` is not null,
-                // this must point to a valid T
-                // as pushed into the stack by `push`
-                unsafe { (*top_ptr).read_next() },
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            );
-
-            if previous_top.is_ok() {
-                return Some(unsafe { &mut *top_ptr });
-            }
-
-            top_ptr = previous_top.unwrap_err();
         }
     }
 
@@ -79,49 +79,19 @@ impl<T: Stackable> Stack<T> {
     /// # Safety
     /// Use *only* for logging purposes
     pub unsafe fn depth(&self) -> usize {
-        let mut ptr = self.top.load(Ordering::Relaxed);
+        let mut ptr = self.top.load(Ordering::Acquire);
         let mut depth: usize = 0;
-        while !ptr.is_null() {
+        // SAFETY: `ptr` is obtained from the existing stack list,
+        // and must be valid via `push`
+        while let Some(element) = unsafe { ptr.as_ref() } {
             depth += 1;
-            ptr = unsafe { (*ptr).read_next() }
+            ptr = element.read_next();
         }
         depth
     }
 }
 
+/// SAFETY: By construction, these stacks are thread-safe
 unsafe impl<T: Stackable> Send for Stack<T> {}
+/// SAFETY: By construction, these stacks are thread-safe
 unsafe impl<T: Stackable> Sync for Stack<T> {}
-
-/// Stack which contains boxed values
-pub struct BoxStack<T: Stackable> {
-    stack: Stack<T>,
-}
-
-#[allow(dead_code)]
-impl<T: Stackable> BoxStack<T> {
-    /// Creates a new, empty stack
-    pub const fn new() -> Self {
-        Self {
-            stack: Stack::new(),
-        }
-    }
-
-    /// Adds an element to the top of the stack
-    pub fn push(&self, value: Box<T>) {
-        self.stack.push(unsafe { &mut *Box::into_raw(value) });
-    }
-
-    /// Removes the first element from the top of the stack
-    pub fn pop(&self) -> Option<Box<T>> {
-        self.stack.pop().map(|t| unsafe { Box::from_raw(t) })
-    }
-
-    /// Computes the current depth of the the stack, for logging purposes
-    /// Not thread safe, or perfectly accurate
-    ///
-    /// # Safety
-    /// Use *only* for logging purposes
-    pub unsafe fn depth(&self) -> usize {
-        unsafe { self.stack.depth() }
-    }
-}

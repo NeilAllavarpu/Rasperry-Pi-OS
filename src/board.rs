@@ -1,3 +1,4 @@
+/// UART (PL011) support
 mod uart;
 pub use uart::serial;
 
@@ -8,10 +9,14 @@ extern "C" {
     fn _per_core_init() -> !;
 }
 
+/// Wakes up all cores and runs their per-core initialization sequences
+/// # Safety
+/// Must only be called once
 #[allow(dead_code)]
-pub fn wake_all_cores() {
-    // Not invalid, but we shouldn't be trying to call this multiple times
+pub unsafe fn wake_all_cores() {
     call_once!();
+    #[allow(clippy::as_conversions)]
+    // SAFETY: These addresses are taken from the spec for Raspbeery Pi 4
     unsafe {
         // Tell the cores to start running the per core init sequence
         core::ptr::write_volatile(0xE0 as *mut unsafe extern "C" fn() -> !, _per_core_init);
@@ -22,8 +27,10 @@ pub fn wake_all_cores() {
     aarch64_cpu::asm::sev();
 }
 
-pub fn init() {
-    // Must only be initialized once
+/// Board-specific initialization sequences
+/// # Safety
+/// Must be initialized only once
+pub unsafe fn init() {
     call_once!();
     serial().init();
 }

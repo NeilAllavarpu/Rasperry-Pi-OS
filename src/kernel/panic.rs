@@ -1,3 +1,5 @@
+/// Upon panics, print the location of the panic and any associated message,
+/// then shutdown
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     use crate::{architecture, println};

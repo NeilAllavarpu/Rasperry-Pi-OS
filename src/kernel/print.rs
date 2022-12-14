@@ -1,7 +1,9 @@
+/// Writes the given information out to the serial output
 pub fn _print(args: core::fmt::Arguments) {
     use crate::{board, kernel::Serial};
     board::serial().write_fmt(args);
 }
+/// Discards the input arguments
 pub fn _unused(_args: core::fmt::Arguments) {}
 
 /// Print to serial output
@@ -26,7 +28,7 @@ macro_rules! println {
 macro_rules! log {
     ($string:expr) => ({
         use core::time::Duration;
-        let timestamp: Duration = $crate::kernel::timer::now();
+        let timestamp: Duration = $crate::kernel::time::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $string),
@@ -37,7 +39,7 @@ macro_rules! log {
     });
     ($format_string:expr, $($arg:tt)*) => ({
         use core::time::Duration;
-        let timestamp: Duration = $crate::kernel::timer::now();
+        let timestamp: Duration = $crate::kernel::time::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $format_string),
@@ -49,6 +51,7 @@ macro_rules! log {
     })
 }
 
+/// A no-op logging mechanism
 #[cfg(not(feature = "verbose"))]
 #[macro_export]
 macro_rules! log {

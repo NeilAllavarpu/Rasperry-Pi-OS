@@ -1,3 +1,10 @@
+use crate::{architecture, call_once_per_core, kernel, kernel::exception::PrivilegeLevel};
+use aarch64_cpu::{
+    asm::eret,
+    registers::{CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, HCR_EL2, SP, SPSR_EL2, SP_EL1},
+};
+use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
+
 // The boot sequence
 core::arch::global_asm!(include_str!("boot.s"));
 
@@ -6,17 +13,10 @@ core::arch::global_asm!(include_str!("boot.s"));
 /// Jumps to the main init sequence\
 #[no_mangle]
 extern "C" fn el2_init() -> ! {
-    use crate::{architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
-    use aarch64_cpu::{
-        asm::eret,
-        registers::{CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, HCR_EL2, SP, SPSR_EL2, SP_EL1},
-    };
-    use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
-
     call_once_per_core!();
     // Make sure this is running in EL2
     assert_eq!(
-        architecture::exception::exception_level(),
+        architecture::exception::el(),
         PrivilegeLevel::Hypervisor,
         "The boot sequence must be running in EL2"
     );
@@ -30,7 +30,6 @@ extern "C" fn el2_init() -> ! {
 
     // Disable interrupts in EL1 mode, and switch the stack pointer on a per-exception level basis
 
-    // why do i need to manually do dis :()
     CNTHCTL_EL2.write(CNTHCTL_EL2::EL1PCEN::SET + CNTHCTL_EL2::EL1PCTEN::SET);
     CNTVOFF_EL2.set(0);
     SPSR_EL2.modify(
@@ -41,12 +40,11 @@ extern "C" fn el2_init() -> ! {
             + SPSR_EL2::M::EL1h,
     );
     // Begin execution with the main init sequence
-    ELR_EL2.set(
-        (crate::kernel::init as *const ())
-            .to_bits()
-            .try_into()
-            .unwrap(),
-    );
+    ELR_EL2.set(architecture::usize_to_u64(
+        #[allow(clippy::fn_to_numeric_cast_any)]
+        #[allow(clippy::as_conversions)]
+        (kernel::init as *const ()).to_bits(),
+    ));
     // Set the stack pointer when execution resumes
     SP_EL1.set(SP.get());
     eret();

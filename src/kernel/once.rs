@@ -1,8 +1,9 @@
-use core::cell::OnceCell;
+use core::{cell::OnceCell, ops::Deref};
 
-/// Can only be set once
+/// A wrapper for an object that can only be set once
 #[derive(Debug)]
 pub struct SetOnce<T> {
+    /// The enclosed value
     inner: OnceCell<T>,
 }
 
@@ -15,23 +16,27 @@ impl<T> SetOnce<T> {
     }
 
     /// Sets the value
-    ///
-    /// Panics if the value is already set
-    pub fn set(&self, value: T) {
+    /// # Safety
+    /// Should only be called once to set the value
+    /// Must not be accessed at all before or during this call
+    pub unsafe fn set(&self, value: T) {
         assert!(self.inner.set(value).is_ok());
     }
+}
 
-    /// Gets the value
-    ///
-    /// Panics if the value is not yet set
-    pub fn get(&self) -> &T {
+impl<T> Deref for SetOnce<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
         self.inner
             .get()
             .expect("Should not access before being set")
     }
 }
 
+// SAFETY: Because the value is only set once, safely, if the underlying type is Sync, then this is also Sync
 unsafe impl<T: Sync> Sync for SetOnce<T> {}
+// SAFETY: Because the value is only set once, safely, if the underlying type is Send, then this is also Send
 unsafe impl<T: Send> Send for SetOnce<T> {}
 
 /// Ensures that the given function is only called once

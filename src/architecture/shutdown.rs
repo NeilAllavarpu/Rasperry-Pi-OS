@@ -7,6 +7,7 @@ pub fn shutdown(exit_code: u32) -> ! {
     use core::sync::atomic::{AtomicBool, Ordering};
     use qemu_exit::QEMUExit;
 
+    /// Stores whether or not a shutdown has already been called
     static SHUTDOWN_CALLED: AtomicBool = AtomicBool::new(false);
     if SHUTDOWN_CALLED.swap(true, Ordering::Relaxed) {
         loop {
@@ -20,6 +21,7 @@ pub fn shutdown(exit_code: u32) -> ! {
         architecture::machine::core_id(),
         exit_code
     );
+    // SAFETY: This is at shutdown and used only for a logging estimate
     unsafe {
         kernel::heap::log_allocator();
     }
