@@ -25,7 +25,10 @@ extern "C" fn el2_init() -> ! {
     HCR_EL2.modify(
         HCR_EL2::RW::EL1IsAarch64
             + HCR_EL2::TGE::DisableTrapGeneralExceptionsToEl2
-            + HCR_EL2::E2H::DisableOsAtEl2,
+            + HCR_EL2::E2H::DisableOsAtEl2
+            + HCR_EL2::IMO::DisableVirtualIRQ
+            + HCR_EL2::FMO::DisableVirtualFIQ
+            + HCR_EL2::VM::Disable,
     );
 
     // Disable interrupts in EL1 mode, and switch the stack pointer on a per-exception level basis

@@ -52,39 +52,25 @@ pub fn enable() {
     SCTLR_EL1.modify(SCTLR_EL1::A::Enable + SCTLR_EL1::NAA::Enable + SCTLR_EL1::SA::Enable);
 }
 
-/// Stores the mask state of exceptions at some point in time
+/// An exception `Guard` masks exceptions while alive,
+/// and restores the prior mask state upon being dropped
 pub struct Guard {
     /// The mask states
     daif: u64,
-    /// For debug purposes
-    should_drop: bool,
 }
 
 impl Guard {
-    /// Creates a default mask state that should not be used directly
-    /// # Safety
-    /// This value should never be properly used: it is intended solely as a default
-    pub const unsafe fn default() -> Self {
-        Self {
-            daif: 0,
-            should_drop: false,
-        }
-    }
-
-    /// C
+    /// Creates a new exception guard, masking exceptions
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let guard = Self {
-            daif: DAIF.get(),
-            should_drop: true,
-        };
-        DAIF.set(0);
-        guard
+        let daif = DAIF.get();
+        DAIF.modify(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked);
+        Self { daif }
     }
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        assert!(self.should_drop);
         DAIF.set(self.daif);
     }
 }

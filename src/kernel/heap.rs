@@ -1,10 +1,5 @@
 // use crate::kernel::Mutex;
-use crate::{
-    architecture::SpinLock,
-    call_once,
-    kernel::{self, Mutex},
-    log,
-};
+use crate::{call_once, kernel, log};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cmp::{max, min},
@@ -55,7 +50,6 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
     pub unsafe fn alloc(&mut self, layout: Layout) -> Option<*mut u8> {
         // Unimplemented: larger blocks
         if layout.size() > BLOCK_SIZE {
-            log!("oops {} > {}", layout.size(), BLOCK_SIZE);
             return None;
         }
         #[allow(clippy::as_conversions)]
@@ -80,7 +74,6 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
     /// # Safety
     /// The range of memory given must be appropriate
     pub unsafe fn init(&mut self, start: *mut (), size: usize) {
-        log!("INIT: {}", BLOCK_SIZE);
         assert!(BLOCK_SIZE.is_power_of_two());
 
         for block_offset in (0..size).step_by(BLOCK_SIZE) {
@@ -113,11 +106,11 @@ impl<const BLOCK_SIZE: usize> FixedBlockHeap<BLOCK_SIZE> {
 /// The general purpose heap allocator for the kernel
 struct HeapAllocator {
     /// 32-byte blocks
-    b32: SpinLock<FixedBlockHeap<32>>,
+    b32: FixedBlockHeap<32>,
     /// 128-byte blocks
-    b128: SpinLock<FixedBlockHeap<128>>,
+    b128: FixedBlockHeap<128>,
     /// 512-byte blocks
-    b512: SpinLock<FixedBlockHeap<512>>,
+    b512: FixedBlockHeap<512>,
     // Anything larger can resort to page allotment
 }
 
@@ -125,9 +118,9 @@ impl HeapAllocator {
     /// Creates a new, uninitialized heap allocator
     const fn new() -> Self {
         Self {
-            b32: SpinLock::new(FixedBlockHeap::new()),
-            b128: SpinLock::new(FixedBlockHeap::new()),
-            b512: SpinLock::new(FixedBlockHeap::new()),
+            b32: FixedBlockHeap::new(),
+            b128: FixedBlockHeap::new(),
+            b512: FixedBlockHeap::new(),
         }
     }
 
@@ -136,12 +129,10 @@ impl HeapAllocator {
         call_once!();
         // SAFETY: These ranges are chosen to be unused and nonoverlapping
         unsafe {
-            self.b512.lock().init(HEAP_START, HEAP_SIZE * 3 / 4);
+            self.b512.init(HEAP_START, HEAP_SIZE * 3 / 4);
             self.b128
-                .lock()
                 .init(HEAP_START.byte_add(HEAP_SIZE * 3 / 4), HEAP_SIZE * 3 / 16);
             self.b32
-                .lock()
                 .init(HEAP_START.byte_add(HEAP_SIZE * 15 / 16), HEAP_SIZE / 16);
         }
     }
@@ -152,9 +143,9 @@ impl HeapAllocator {
     unsafe fn log(&self) {
         // SAFETY: By assumption, this is non-thread-safe logging
         unsafe {
-            self.b512.lock().log();
-            self.b128.lock().log();
-            self.b32.lock().log();
+            self.b512.log();
+            self.b128.log();
+            self.b32.log();
         }
     }
 }
@@ -169,15 +160,15 @@ unsafe impl GlobalAlloc for HeapAllocator {
         match max(layout.align(), layout.size()) {
             0..=32 => {
                 // SAFETY: By assumption, the layout should be valid
-                unsafe { KERNEL_HEAP.b32.lock().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+                unsafe { KERNEL_HEAP.b32.alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
             33..=128 => {
                 // SAFETY: By assumption, the layout should be valid
-                unsafe { KERNEL_HEAP.b128.lock().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+                unsafe { KERNEL_HEAP.b128.alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
             129..=512 => {
                 // SAFETY: By assumption, the layout should be valid
-                unsafe { KERNEL_HEAP.b512.lock().alloc(layout) }.unwrap_or(core::ptr::null_mut())
+                unsafe { KERNEL_HEAP.b512.alloc(layout) }.unwrap_or(core::ptr::null_mut())
             }
             _ => core::ptr::null_mut(),
         }
@@ -186,11 +177,11 @@ unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         match max(layout.align(), layout.size()) {
             // SAFETY: By assumption, the pointer and layout should be valid
-            0..=32 => unsafe { KERNEL_HEAP.b32.lock().dealloc(ptr, layout) },
+            0..=32 => unsafe { KERNEL_HEAP.b32.dealloc(ptr, layout) },
             // SAFETY: By assumption, the pointer and layout should be valid
-            33..=128 => unsafe { KERNEL_HEAP.b128.lock().dealloc(ptr, layout) },
+            33..=128 => unsafe { KERNEL_HEAP.b128.dealloc(ptr, layout) },
             // SAFETY: By assumption, the pointer and layout should be valid
-            129..=512 => unsafe { KERNEL_HEAP.b512.lock().dealloc(ptr, layout) },
+            129..=512 => unsafe { KERNEL_HEAP.b512.dealloc(ptr, layout) },
             _ => (),
         }
     }

@@ -1,8 +1,11 @@
-use crate::{architecture, kernel};
+use crate::{
+    architecture::{self, exception},
+    kernel,
+};
 use aarch64_cpu::asm::{sev, wfe};
 use core::{
-    cell::UnsafeCell,
-    ptr::{self, drop_in_place},
+    cell::{RefCell, UnsafeCell},
+    mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
 
@@ -13,7 +16,7 @@ pub struct SpinLock<T> {
     /// Whether or not the spinlock is taken
     is_locked: AtomicBool,
     /// State of the interrupts, prior to being locked
-    guard: UnsafeCell<architecture::exception::Guard>,
+    guard: RefCell<MaybeUninit<exception::Guard>>,
 }
 
 impl<T> SpinLock<T> {
@@ -22,10 +25,7 @@ impl<T> SpinLock<T> {
         Self {
             inner: UnsafeCell::new(data),
             is_locked: AtomicBool::new(false),
-            guard: UnsafeCell::new(
-                // SAFETY: This state is never used, as it is overwritten upon locking
-                unsafe { architecture::exception::Guard::default() },
-            ),
+            guard: RefCell::new(MaybeUninit::uninit()),
         }
     }
 }
@@ -39,29 +39,31 @@ impl<T> kernel::Mutex for SpinLock<T> {
     type State = T;
 
     fn lock(&self) -> kernel::MutexGuard<Self> {
-        let guard = architecture::exception::Guard::new();
-        if self.is_locked.swap(true, Ordering::AcqRel) {
+        let mut guard = architecture::exception::Guard::new();
+        while self.is_locked.swap(true, Ordering::AcqRel) {
             drop(guard);
             wfe();
-            return self.lock();
+            guard = architecture::exception::Guard::new();
         }
 
         // SAFETY:
         // Since the lock has been acquired, setting the internal state is safe,
         // creating the lock guard is safe, and dereferencing the raw pointer to
-        // create a unique mutable reference is also safe.
+        // create a unique mutable reference is also safe. Writing over the
+        // previous guard is also safe because there should never be a valid
+        // guard remaining - either this stores the uninitialized guard, which
+        // should never be dropped, or this stores a stale previous guard, which
+        // has already been dropped by `unlock`
         unsafe {
-            ptr::write(self.guard.get(), guard);
+            self.guard.borrow_mut().write(guard);
             kernel::MutexGuard::new(self, &mut *self.inner.get())
         }
     }
 
     unsafe fn unlock(&self) {
+        // SAFETY: `guard` was set by `lock` and so must be valid
+        let _guard = unsafe { self.guard.borrow_mut().assume_init_read() };
         self.is_locked.store(false, Ordering::Release);
         sev();
-        // SAFETY: `guard` was set by `lock` and so must be valid
-        unsafe {
-            drop_in_place(self.guard.get());
-        }
     }
 }

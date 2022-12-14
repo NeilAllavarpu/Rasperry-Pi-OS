@@ -42,6 +42,7 @@
 #![allow(clippy::pub_use)]
 #![allow(clippy::self_named_module_files)]
 #![allow(clippy::default_numeric_fallback)]
+#![allow(clippy::new_without_default)]
 
 extern crate alloc;
 
