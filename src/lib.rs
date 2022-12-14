@@ -29,19 +29,22 @@ pub mod kernel;
 
 /// The default runner for unit tests.
 pub fn test_runner(tests: &[&TestCase]) -> ! {
+    use crate::kernel::time::now;
     use core::time::Duration;
 
+    const DEFAULT_LOOPS: u64 = 10;
     let num_loops: u64 = option_env!("LOOP")
         .and_then(|v| str::parse(v).ok())
-        .unwrap_or(10);
+        .unwrap_or(DEFAULT_LOOPS);
+
     // Timeout thread
     kernel::thread::schedule(thread!(move || {
-        use crate::kernel::time::now;
         let start = now();
         let timeout: Duration = Duration::from_secs(num_loops);
 
         loop {
             assert!(now() - start < timeout, "Test timed out");
+            kernel::thread::switch();
         }
     }));
 
@@ -53,10 +56,12 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
         for i in 1..=num_loops {
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
+            let start = now();
             // Run the actual test.
             (test.test)();
+            let end = now();
 
-            println!(".... PASSED")
+            println!(".... PASSED: {:#?}", end - start);
         }
     }
 

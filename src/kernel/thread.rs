@@ -1,12 +1,13 @@
 use crate::{
     architecture::{self, SpinLock},
     call_once, call_once_per_core,
-    kernel::{Mutex, PerCore, SetOnce},
+    kernel::{heap::FixedBlockHeap, Mutex, PerCore, SetOnce},
 };
 use aarch64_cpu::asm::{sev, wfe};
 use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc};
 use core::{
-    sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering},
+    alloc::Layout,
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::Duration,
 };
 
@@ -18,6 +19,8 @@ pub struct Thread {
     /// The last-saved stack pointer of the thread
     /// Should not be used, except for when context switching or upon creation
     sp: *mut u128,
+    /// the SP from allocation
+    allocated_sp: *mut u8,
     /// The total CPU runtime of this thread
     pub runtime: Duration,
     /// The time when the thread last began to run
@@ -40,18 +43,25 @@ static ACTIVE_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static READY_THREADS: SetOnce<ReadyThreads> = SetOnce::new();
 /// The idle cores, one per core
 static IDLE_THREADS: SetOnce<PerCore<Arc<Thread>>> = SetOnce::new();
-
+/// The static size of a stack, in bytes
+/// TODO: Convert this to a dynamic size via paging
+const STACK_SIZE: usize = 0x2000;
+/// The layout for the stack
+// SAFETY: This should be a valid layout
+const STACK_LAYOUT: Layout = unsafe { Layout::from_size_align_unchecked(STACK_SIZE, STACK_SIZE) };
+/// The pool of thread stacks
+static mut STACKS: FixedBlockHeap<STACK_SIZE> = FixedBlockHeap::new();
 /// Gets a prepared stack for a thread to use
-fn get_stack() -> *mut u128 {
-    /// The base of the next stack to use
+fn get_stack() -> (*mut u8, *mut u128) {
     #[allow(clippy::as_conversions)]
-    static STACK_NEXT: AtomicPtr<u128> = AtomicPtr::new(0x40_0000 as *mut u128);
-    /// The static size of a stack, in bytes
-    /// TODO: Convert this to a dynamic size via paging
-    const STACK_SIZE: usize = 0x2000;
-    let sp = STACK_NEXT.fetch_byte_add(STACK_SIZE, core::sync::atomic::Ordering::Relaxed);
+    let sp =
+    // SAFETY: yes
+        unsafe { STACKS.alloc(STACK_LAYOUT) }
+            .expect("Out of stacks!");
     // SAFETY: The passed stack pointer is correctly computed via allocation
-    unsafe { architecture::thread::set_up_stack(sp.byte_add(STACK_SIZE)) }
+    (sp, unsafe {
+        architecture::thread::set_up_stack(sp.byte_add(STACK_SIZE).cast())
+    })
 }
 
 /// Creates a new thread to run the given work
@@ -74,13 +84,15 @@ impl Thread {
         if curr_len < active_count {
             threads.reserve(active_count - curr_len);
         }
+        let (allocated_sp, sp) = get_stack();
 
         Arc::new(Self {
             id: NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
             work: Box::new(work),
             runtime: Duration::ZERO,
             last_started: Duration::default(),
-            sp: get_stack(),
+            allocated_sp,
+            sp,
         })
     }
 
@@ -100,14 +112,17 @@ impl Thread {
 
 /// Stops the currently executing thread, and releases its resources
 pub fn stop() -> ! {
-    if ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed) == 1 {
-        architecture::shutdown(0);
-    }
     architecture::thread::context_switch(
         READY_THREADS
             .get()
             .unwrap_or_else(|| IDLE_THREADS.with_current(|idle| Arc::clone(idle))),
-        drop,
+        |me| {
+            let allocated_sp = me.allocated_sp;
+            ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+            drop(me);
+            // SAFETY: This is the pointer received from `alloc` and the layout given to `alloc`
+            unsafe { STACKS.dealloc(allocated_sp, STACK_LAYOUT) }
+        },
     );
     unreachable!()
 }
@@ -179,6 +194,8 @@ pub unsafe fn init() {
     // SAFETY: This is called in the initialization sequence on a single core
     // and so no concurrent or prior accesses are possible
     unsafe {
+        #[allow(clippy::as_conversions)]
+        STACKS.init(0x40_0000 as *mut (), 0x2000_0000 - 0x40_0000);
         READY_THREADS.set(ReadyThreads {
             threads: SpinLock::new(BinaryHeap::new()),
         });

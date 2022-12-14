@@ -33,6 +33,9 @@ extern "C" fn curr_elx_sync() {
     match ESR_EL1.read_as_enum(ESR_EL1::EC) {
         Some(ESR_EL1::EC::Value::InstrAbortCurrentEL) => handle_instruction_abort(),
         Some(ESR_EL1::EC::Value::DataAbortCurrentEL) => handle_data_abort(),
+        Some(ESR_EL1::EC::Value::Unknown) => {
+            panic!("Unknown synchronous exception taken with SP_ELX")
+        }
         None => panic!("Invalid synchronous exception taken with SP_ELX"),
         _ => todo!(
             "Unhandled synchronous exception taken with SP_ELX: {:06b}",
@@ -54,6 +57,7 @@ register_bitfields![u64, DataAbortISS [
     ],
     DFSC OFFSET(0) NUMBITS(6) [
         ALIGNMENT_FAULT = 0b10_0001,
+        SYNC_EXTERNAL_ABORT = 0b01_0000,
     ]
 ]];
 
@@ -63,7 +67,7 @@ fn handle_instruction_abort() {
         "Instruction Abort exception, taken from the current EL: {:b}",
         ESR_EL1.read(ESR_EL1::ISS)
     );
-    log!("Faulting address: 0x{:16X}", FAR_EL1.get());
+    log!("Faulting address: 0x{:->16X}", FAR_EL1.get());
     match ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS) {
         Some(DataAbortISS::VALID::Value::VALID) => {
             match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
@@ -94,7 +98,7 @@ fn handle_data_abort() {
         "Data Abort exception, taken from the current EL: {:b}",
         ESR_EL1.read(ESR_EL1::ISS)
     );
-    log!("Faulting address: 0x{:16X}", FAR_EL1.get());
+    log!("Faulting address: 0x{:0>16X}", FAR_EL1.get());
     match ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS) {
         Some(DataAbortISS::VALID::Value::VALID) => {
             match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
@@ -110,10 +114,13 @@ fn handle_data_abort() {
 
     match ESR_EL1.read_as_enum::<DataAbortISS::DFSC::Value>(ESR_EL1::ISS) {
         Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => log!("Reason: Alignment fault"),
-        _ => log!("Unhandled status code"),
+        Some(DataAbortISS::DFSC::Value::SYNC_EXTERNAL_ABORT) => {
+            log!("Reason: Synchronous external abort");
+        }
+        None => log!("Unhandled status code"),
     }
 
-    log!("{:b}", ESR_EL1.get() & 0b11_1111);
+    log!("Raw ISS: {:0>25b}", ESR_EL1.read(ESR_EL1::ISS));
 
     panic!("Unable to handle exception");
 }

@@ -49,7 +49,7 @@ pub fn enable() {
     );
     DAIF.write(DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked);
 
-    SCTLR_EL1.modify(SCTLR_EL1::A::Enable);
+    SCTLR_EL1.modify(SCTLR_EL1::A::Enable + SCTLR_EL1::NAA::Enable + SCTLR_EL1::SA::Enable);
 }
 
 /// Stores the mask state of exceptions at some point in time

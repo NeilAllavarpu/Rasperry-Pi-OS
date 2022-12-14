@@ -16,7 +16,7 @@ fn kernel_main() {
 }
 
 add_test!(runs_basic_threading, {
-    const NUM_THREADS: u64 = 16;
+    const NUM_THREADS: u64 = 62;
     let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
     for _ in 0..NUM_THREADS {
@@ -32,10 +32,3 @@ add_test!(runs_basic_threading, {
 
     assert!(counter.load(Ordering::Acquire) == NUM_THREADS);
 });
-
-// const t: TestCase = TestCase {
-//     name: "Runs basic threading",
-//     test: runs_basic_threads,
-// };
-
-// fn runs_basic_threads() {}
