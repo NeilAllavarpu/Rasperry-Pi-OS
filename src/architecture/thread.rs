@@ -5,8 +5,9 @@ use crate::{
 use aarch64_cpu::registers::TPIDR_EL1;
 use alloc::sync::Arc;
 use core::{
+    any::Any,
     arch::global_asm,
-    ptr::{self, Pointee},
+    ptr::{self, addr_of, Pointee},
 };
 use tock_registers::interfaces::{Readable, Writeable};
 
@@ -64,7 +65,7 @@ extern "C" {
     #[allow(improper_ctypes)]
     fn _context_switch(
         data: *mut (),
-        metadata: *const (),
+        metadata: *const dyn Any,
         new_thread: *mut Thread,
         callback: extern "C" fn(data_address: *mut (), metadata: *const (), thread: *mut Thread),
     );
@@ -102,9 +103,10 @@ where
             ptr::addr_of_mut!(callback).to_raw_parts();
         // # SAFETY: The parameters are correctly set up and passed to context switching
         unsafe {
+            #[allow(clippy::as_conversions)]
             _context_switch(
                 data,
-                &metadata,
+                addr_of!(metadata) as *const dyn Any,
                 Arc::into_raw(new_thread).cast_mut(),
                 invoke_callback::<Callback>,
             );
