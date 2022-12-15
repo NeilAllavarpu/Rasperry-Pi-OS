@@ -20,17 +20,8 @@
 	stp	x26, x27, [sp, #0xD0]
 	stp	x28, x29, [sp, #0xE0]
 
-	// Save the exception link register, saved program status,
-    // and exception syndrome register (ESR_EL1).
-	mrs	x0, ELR_EL1
-	mrs	x2, SPSR_EL1
-	mrs	x3, ESR_EL1
+	str	lr, [sp, #0xF0]
 
-	stp	lr, x1, [sp, #0xF0]
-	stp	x2, x3, [sp, #0x100]
-
-	// Pass the context as an argument to the handler
-	mov	x0,  sp
 	bl	\handler
 
 	// Upon end of handler, return from the exception
@@ -45,45 +36,40 @@
 .global _exception_vector
 _exception_vector:
 .balign 0x80
-    EXCEPTION_HANDLER curr_el0_sync
+    EXCEPTION_HANDLER handle_curr_el0_sync
 .balign 0x80
-	EXCEPTION_HANDLER curr_el0_irq
+	EXCEPTION_HANDLER handle_curr_el0_irq
 .balign 0x80
-    EXCEPTION_HANDLER curr_el0_fiq
+    EXCEPTION_HANDLER handle_curr_el0_fiq
 .balign 0x80
-	EXCEPTION_HANDLER curr_el0_other
+	EXCEPTION_HANDLER handle_curr_el0_other
 .balign 0x80
-	EXCEPTION_HANDLER curr_elx_sync
+	EXCEPTION_HANDLER handle_curr_elx_sync
 .balign 0x80
-	EXCEPTION_HANDLER curr_elx_irq
+	EXCEPTION_HANDLER handle_curr_elx_irq
 .balign 0x80
-	EXCEPTION_HANDLER curr_elx_fiq
+	EXCEPTION_HANDLER handle_curr_elx_fiq
 .balign 0x80
-	EXCEPTION_HANDLER curr_elx_other
+	EXCEPTION_HANDLER handle_curr_elx_other
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_sync_64
+	EXCEPTION_HANDLER handle_lower_el_sync_64
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_irq_64
+	EXCEPTION_HANDLER handle_lower_el_irq_64
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_fiq_64
+	EXCEPTION_HANDLER handle_lower_el_fiq_64
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_other_64
+	EXCEPTION_HANDLER handle_lower_el_other_64
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_sync_32
+	EXCEPTION_HANDLER handle_lower_el_sync_32
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_irq_32
+	EXCEPTION_HANDLER handle_lower_el_irq_32
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_fiq_32
+	EXCEPTION_HANDLER handle_lower_el_fiq_32
 .balign 0x80
-	EXCEPTION_HANDLER lower_el_other_32
+	EXCEPTION_HANDLER handle_lower_el_other_32
 exception_return:
     // Restore everything in reverse order that it was saved
-	ldp	x2, x3, [sp, #0x100]
-	ldp	lr, x1, [sp, #0xF0]
-
-	msr	ESR_EL1, x3
-	msr	SPSR_EL1, x2
-	msr	ELR_EL1, x1
+	ldr	lr, [sp, #0xF0]
 
 	ldp	x28, x29, [sp, #0xE0]
 	ldp	x26, x27, [sp, #0xD0]

@@ -2,6 +2,7 @@ use core::{cell::OnceCell, ops::Deref};
 
 /// A wrapper for an object that can only be set once
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct SetOnce<T> {
     /// The enclosed value
     inner: OnceCell<T>,
@@ -41,6 +42,7 @@ unsafe impl<T: Send> Send for SetOnce<T> {}
 
 /// Ensures that the given function is only called once
 /// Panics if run more than once
+#[allow(clippy::module_name_repetitions)]
 #[macro_export]
 macro_rules! call_once {
     () => {{

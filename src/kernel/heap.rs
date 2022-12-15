@@ -28,6 +28,7 @@ impl collections::Stackable for FreeBlock {
 }
 
 /// A fixed-block allocator
+#[allow(clippy::module_name_repetitions)]
 pub struct FixedBlockHeap {
     /// The next free block in the heap
     first_free: collections::Stack<FreeBlock>,

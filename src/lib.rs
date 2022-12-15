@@ -12,6 +12,7 @@
 #![feature(pointer_byte_offsets)]
 #![feature(ptr_metadata)]
 #![feature(ptr_to_from_bits)]
+#![feature(stmt_expr_attributes)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(test_runner)]
 

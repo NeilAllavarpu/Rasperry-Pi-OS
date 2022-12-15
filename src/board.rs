@@ -1,6 +1,11 @@
+/// Wrapper for memory-mapped registers
+mod mmio;
+use mmio::Mmio;
 /// UART (PL011) support
 mod uart;
 pub use uart::serial;
+/// IRQ handling
+pub mod irq;
 
 use crate::call_once;
 
@@ -33,4 +38,5 @@ pub unsafe fn wake_all_cores() {
 pub unsafe fn init() {
     call_once!();
     serial().init();
+    irq::init();
 }

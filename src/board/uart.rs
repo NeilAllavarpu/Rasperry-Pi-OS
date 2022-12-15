@@ -1,8 +1,5 @@
-use crate::{architecture::SpinLock, call_once, kernel, kernel::Mutex};
-use core::{
-    fmt::{self, Write},
-    ops,
-};
+use crate::{architecture::SpinLock, board::Mmio, call_once, kernel, kernel::Mutex};
+use core::fmt::{self, Write};
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_structs,
@@ -14,30 +11,6 @@ register_structs! {
     pub RegisterBlock {
         (0x00 => DR: ReadWrite<u32>),
         (0x04 => @END),
-    }
-}
-
-/// Memory mapped IO wrapper
-pub struct Mmio<T> {
-    /// Beginning address of the MMIO region
-    start_addr: *mut T,
-}
-
-impl<T> Mmio<T> {
-    /// Creates an MMIO wrapper at the given location
-    /// # Safety
-    /// `start_addr` must be correct, and should not be reused by anything else
-    pub const unsafe fn new(start_addr: *mut T) -> Self {
-        Self { start_addr }
-    }
-}
-
-impl<T> ops::Deref for Mmio<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: By assumption, this dereference should be safe
-        unsafe { &*self.start_addr }
     }
 }
 
