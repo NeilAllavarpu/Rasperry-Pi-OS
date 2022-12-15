@@ -1,5 +1,5 @@
 // use crate::kernel::Mutex;
-use crate::{call_once, kernel, log};
+use crate::{call_once, collections, log};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cmp::{max, min},
@@ -17,7 +17,7 @@ struct FreeBlock {
     /// Pointer to the next free block
     next: *mut FreeBlock,
 }
-impl kernel::Stackable for FreeBlock {
+impl collections::Stackable for FreeBlock {
     fn read_next(&self) -> *mut Self {
         self.next
     }
@@ -30,7 +30,7 @@ impl kernel::Stackable for FreeBlock {
 /// A fixed-block allocator
 pub struct FixedBlockHeap {
     /// The next free block in the heap
-    first_free: kernel::Stack<FreeBlock>,
+    first_free: collections::Stack<FreeBlock>,
     /// Block size, in bytes
     block_size: usize,
     /// The size of the heap
@@ -42,7 +42,7 @@ impl FixedBlockHeap {
     /// Should not be used until initialized
     pub const fn new(block_size: usize) -> Self {
         Self {
-            first_free: kernel::Stack::new(),
+            first_free: collections::Stack::new(),
             block_size,
             size: 0,
         }

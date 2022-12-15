@@ -24,6 +24,7 @@ use core::{
 };
 pub mod architecture;
 pub mod board;
+pub mod collections;
 pub mod kernel;
 
 /// The default runner for unit tests.

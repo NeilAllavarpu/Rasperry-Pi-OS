@@ -47,6 +47,8 @@ fn _test_runner(_: &[&()]) {}
 mod architecture;
 /// Board-specific implementaitons
 mod board;
+/// Collections
+mod collections;
 /// Generic implementations
 mod kernel;
 

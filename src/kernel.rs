@@ -16,8 +16,6 @@ mod per_core;
 pub mod print;
 /// The serial interface
 pub mod serial;
-/// Lock-free stacks
-mod stack;
 /// Threading
 pub mod thread;
 /// Clock and timer functions
@@ -29,5 +27,3 @@ pub use mutex::Mutex;
 pub use once::SetOnce;
 pub use per_core::PerCore;
 pub use serial::Serial;
-pub use stack::Stack;
-pub use stack::Stackable;

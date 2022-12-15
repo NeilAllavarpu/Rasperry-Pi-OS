@@ -57,44 +57,28 @@ impl<T: Stackable> Stack<T> {
 
     /// Adds an element to the top of the stack
     pub fn push(&self, value: &mut T) {
-        let (mut top, mut counter) =
-            Self::extract_parts(self.top_and_counter.load(Ordering::Acquire));
-        // SAFETY: This is the only valid place to use this method
-        unsafe { value.set_next(top) }
-        while let Err(next_top_and_counter) = self.top_and_counter.compare_exchange_weak(
-            Self::combine_parts(top, counter),
-            Self::combine_parts(value, counter + 1),
-            Ordering::Release,
-            Ordering::Acquire,
-        ) {
-            let (top_, counter_) = Self::extract_parts(next_top_and_counter);
-            top = top_;
-            counter = counter_;
-            // SAFETY: This is the only valid place to use this method
-            unsafe { value.set_next(top) }
-        }
+        self.top_and_counter
+            .fetch_update(Ordering::Release, Ordering::Acquire, |top_and_counter| {
+                let (top, counter) = Self::extract_parts(top_and_counter);
+                // SAFETY: This is the only valid place to use this method
+                unsafe { value.set_next(top) };
+                Some(Self::combine_parts(value, counter + 1))
+            })
+            .expect("Should never return `None`");
     }
 
     /// Removes the first element from the top of the stack
     pub fn pop(&self) -> Option<&mut T> {
-        let (mut top, mut counter) =
-            Self::extract_parts(self.top_and_counter.load(Ordering::Acquire));
-        // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
-        while let Some(previous_top) = unsafe { top.as_mut() } {
-            if let Err(next_top_and_counter) = self.top_and_counter.compare_exchange_weak(
-                Self::combine_parts(top, counter),
-                Self::combine_parts(previous_top.read_next(), counter),
-                Ordering::Relaxed,
-                Ordering::Acquire,
-            ) {
-                let (top_, counter_) = Self::extract_parts(next_top_and_counter);
-                top = top_;
-                counter = counter_;
-            } else {
-                return Some(previous_top);
-            }
-        }
-        None
+        self.top_and_counter
+            .fetch_update(Ordering::Relaxed, Ordering::Acquire, |top_and_counter| {
+                let (top_ptr, counter) = Self::extract_parts(top_and_counter);
+                // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
+                unsafe { top_ptr.as_mut() }.map(|top| Self::combine_parts(top.read_next(), counter))
+            })
+            .ok()
+            .and_then(|top|
+                // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
+                unsafe { Self::extract_parts(top).0.as_mut() })
     }
 
     /// Computes the current depth of the the stack, for logging purposes
