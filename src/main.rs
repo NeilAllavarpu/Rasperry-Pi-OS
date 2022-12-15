@@ -40,6 +40,8 @@
 #![allow(clippy::default_numeric_fallback)]
 #![allow(clippy::new_without_default)]
 
+use aarch64_cpu::asm::wfi;
+
 extern crate alloc;
 
 /// Dummy function for rust-analyzer issues
@@ -56,7 +58,12 @@ mod kernel;
 
 #[no_mangle]
 /// The default main sequence
-pub fn kernel_main() {}
+pub fn kernel_main() {
+    log!("Kernel main running");
+    loop {
+        wfi();
+    }
+}
 
 /// Dummy macro for kernel tests, replaced by `lib.rs` when tests
 #[macro_export]

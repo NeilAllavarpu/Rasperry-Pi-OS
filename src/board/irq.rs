@@ -1,9 +1,5 @@
-use crate::{
-    architecture::{machine::core_id, time::frequency},
-    board::Mmio,
-    kernel, log,
-};
-use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0};
+use crate::{architecture::machine::core_id, board::Mmio, kernel};
+use aarch64_cpu::registers::CNTP_CTL_EL0;
 use core::ops::Deref;
 use tock_registers::{
     interfaces::{ReadWriteable, Readable, Writeable},
@@ -25,7 +21,7 @@ register_bitfields! {u32,
 
 register_structs! {
     #[allow(non_snake_case)]
-    IRQ_Register_Block {
+    Local_IRQ_Register_Block {
         (0x00 => _reserved),
         (0x60 => CORE0_INTERRUPT_SOURCE: ReadOnly<u32, INTERRUPT_SOURCE::Register>),
         (0x64 => CORE1_INTERRUPT_SOURCE: ReadOnly<u32, INTERRUPT_SOURCE::Register>),
@@ -37,7 +33,7 @@ register_structs! {
 
 register_structs! {
     #[allow(non_snake_case)]
-    IRQ_Register_Block_Init {
+    Local_IRQ_Register_Block_Init {
         (0x00 => _reserved),
         (0x40 => CORE0_TIMER_INTERRUPT_CONTROL: WriteOnly<u32, TIMER_CONTROL::Register>),
         (0x44 => CORE1_TIMER_INTERRUPT_CONTROL: WriteOnly<u32, TIMER_CONTROL::Register>),
@@ -47,14 +43,28 @@ register_structs! {
     }
 }
 
+register_structs! {
+    #[allow(non_snake_case)]
+    Peripheral_Register_Block {
+        (0x00 => _reserved1),
+        (0x10 => ENABLE: WriteOnly<u64>),
+        (0x18 => @END),
+    }
+}
+
 /// Source: <https://datasheets.raspberrypi.com/bcm2836/bcm2836-peripherals.pdf>
 #[allow(clippy::as_conversions)]
-const REGISTERS_ADDRESS: *mut IRQ_Register_Block = 0x4000_0000 as *mut IRQ_Register_Block;
+const LOCAL_REGISTERS_ADDRESS: *mut Local_IRQ_Register_Block =
+    0x4000_0000 as *mut Local_IRQ_Register_Block;
+/// Source: <https://datasheets.raspberrypi.com/bcm2836/bcm2836-peripherals.pdf>
+#[allow(clippy::as_conversions)]
+const PERIPH_REGISTERS_ADDRESS: *mut Peripheral_Register_Block =
+    0x3F00_B200 as *mut Peripheral_Register_Block;
 
 /// Wrapper for the memory-mapped IRQ registers
 struct IrqRegisters {
     /// The actual registers
-    registers: Mmio<IRQ_Register_Block>,
+    registers: Mmio<Local_IRQ_Register_Block>,
 }
 
 impl IrqRegisters {
@@ -64,13 +74,13 @@ impl IrqRegisters {
     const unsafe fn new() -> Self {
         Self {
             // SAFETY: This should only be used once
-            registers: unsafe { Mmio::new(REGISTERS_ADDRESS) },
+            registers: unsafe { Mmio::new(LOCAL_REGISTERS_ADDRESS) },
         }
     }
 }
 
 impl Deref for IrqRegisters {
-    type Target = IRQ_Register_Block;
+    type Target = Local_IRQ_Register_Block;
 
     fn deref(&self) -> &Self::Target {
         &self.registers
@@ -106,15 +116,17 @@ fn handle_core_irq(interrupt_source: &ReadOnly<u32, INTERRUPT_SOURCE::Register>)
         // Interrupt is handled
         CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::CLEAR);
     } else {
-        log!("big sad");
+        unreachable!("Unhandled IRQ");
     }
 }
 
-/// Enables IRQs from the peripherals
+const UART_BIT: u64 = 47;
+
+/// Enables IRQs (timer, UART)
 pub fn init() {
     let control_registers =
         // SAFETY: These registers are only ever used during the initialization process
-        unsafe { Mmio::<IRQ_Register_Block_Init>::new(REGISTERS_ADDRESS.cast()) };
+        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(LOCAL_REGISTERS_ADDRESS.cast()) };
 
     // Enable timer interrupts for all cores
     control_registers
@@ -129,4 +141,10 @@ pub fn init() {
     control_registers
         .CORE3_TIMER_INTERRUPT_CONTROL
         .write(TIMER_CONTROL::nCNTPNSIRQ::SET);
+
+    let ctl2 =
+        // SAFETY: These registers are only ever used during the initialization process
+        unsafe { Mmio::<Peripheral_Register_Block>::new(PERIPH_REGISTERS_ADDRESS.cast()) };
+
+    ctl2.ENABLE.set(1 << UART_BIT);
 }

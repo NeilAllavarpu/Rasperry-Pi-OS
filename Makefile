@@ -26,7 +26,7 @@ KERNEL_MANIFEST      = Cargo.toml
 KERNEL_LINKER_SCRIPT = kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
 KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
-KERNEL_ELF_DEPS = $(filter-out %: ,$(file < $(KERNEL_ELF).d)) $(KERNEL_MANIFEST) $(LAST_BUILD_CONFIG)
+KERNEL_ELF_DEPS = $(shell find src -type f) $(KERNEL_MANIFEST)
 
 # Rust + other build things
 RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
@@ -40,7 +40,7 @@ RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
     # -D warnings                   \
     -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET) --manifest-path $(KERNEL_MANIFEST)
+COMPILER_ARGS = --target=$(TARGET) --manifest-path $(KERNEL_MANIFEST) --features=verbose
 
 ifeq ($(VERBOSE), 1)
 COMPILER_ARGS += --features=verbose
