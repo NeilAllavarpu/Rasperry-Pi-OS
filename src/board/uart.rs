@@ -1,10 +1,10 @@
 /// Documentation for the UART: <https://datasheets.raspberrypi.com/bcm2711/bcm2711-peripherals.pdf>
-use crate::{architecture::SpinLock, board::Mmio, call_once, kernel, kernel::Mutex};
+use crate::{architecture::SpinLock, board::Mmio, call_once, kernel, kernel::Mutex, log};
 use core::fmt::{self, Write};
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_bitfields, register_structs,
-    registers::ReadWrite,
+    registers::{ReadOnly, ReadWrite},
 };
 
 register_bitfields! {
@@ -31,8 +31,29 @@ register_bitfields! {
         DATA OFFSET(0) NUMBITS(8)
     ],
 
+    // The UART_IMSC Register is the interrupt mask set/clear register.
     IMSC [
-        RXIM OFFSET(4) NUMBITS(1)
+        /// Overrun error interrupt mask
+        OEIM OFFSET(10) NUMBITS(1),
+        /// Break error interrupt mask
+        BEIM OFFSET(9) NUMBITS(1),
+        /// Parity error interrupt mask
+        PEIM OFFSET(8) NUMBITS(1),
+        /// Framing error interrupt mask
+        FEIM OFFSET(7) NUMBITS(1),
+        /// Receive timeout interrupt mask
+        RTIM OFFSET(6) NUMBITS(1),
+        /// Transmit interrupt mask
+        TXIM OFFSET(5) NUMBITS(1),
+        /// Receive interrupt mask
+        RXIM OFFSET(4) NUMBITS(1),
+        /// nUARTCTS modem interrupt mask.
+        CTSMIM OFFSET(1) NUMBITS(1)
+    ],
+    // The UART_MIS Register is the masked interrupt status register. This register returns the current masked status value of the corresponding interrupt.
+    MIS [
+        /// Receive masked interrupt status. Returns the masked interrupt state of the UARTRXINTR interrupt.
+        RXMIS OFFSET(4) NUMBITS(1)
     ]
 }
 
@@ -42,7 +63,9 @@ register_structs! {
         (0x00 => DR: ReadWrite<u32, DR::Register>),
         (0x04 => _reserved),
         (0x38 => IMSC: ReadWrite<u32, IMSC::Register>),
-        (0x3C => @END),
+        (0x3C => _reserved2),
+        (0x40 => MIS: ReadOnly<u32, MIS::Register>),
+        (0x44 => @END),
     }
 }
 
@@ -74,7 +97,16 @@ impl UartInner {
 
     /// Initializes the UART
     pub fn init(&mut self) {
-        self.registers.IMSC.write(IMSC::RXIM::SET);
+        // Enable all interrupts
+        self.registers.IMSC.write(
+            // IMSC::OEIM::SET
+            // + IMSC::BEIM::SET
+            // + IMSC::PEIM::SET
+            // + IMSC::FEIM::SET
+            // + IMSC::RTIM::SET
+            // + IMSC::TXIM::SET
+            IMSC::RXIM::SET, // + IMSC::CTSMIM::SET,
+        );
     }
 
     /// Sends a byte across the UART
@@ -91,6 +123,12 @@ impl UartInner {
                 .try_into()
                 .expect("Mask should prevent overflow"),
         )
+    }
+
+    /// hi
+    fn handle_interrupt(&mut self) {
+        assert!(self.registers.MIS.matches_any(MIS::RXMIS::SET));
+        self.registers.DR.get();
     }
 }
 
@@ -123,6 +161,12 @@ impl Uart {
         call_once!();
         self.inner.lock().init();
     }
+}
+
+/// a
+pub fn handle_interrupt() {
+    log!("Handling uart\n");
+    UART.inner.lock().handle_interrupt();
 }
 
 impl kernel::Serial for Uart {

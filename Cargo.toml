@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 aarch64-cpu = "*"
+phf = { version = "*", default-features=false, features=["macros"] }
 qemu-exit = "*"
 tock-registers = "*"
 [lib]
