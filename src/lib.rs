@@ -22,6 +22,7 @@
 extern crate alloc;
 pub mod architecture;
 pub mod board;
+pub mod cell;
 pub mod collections;
 pub mod kernel;
 pub mod macros;

@@ -56,6 +56,8 @@ fn _test_runner(_: &[&()]) {}
 mod architecture;
 /// Board-specific implementaitons
 mod board;
+/// Additional cells
+pub mod cell;
 /// Collections
 mod collections;
 /// Generic implementations

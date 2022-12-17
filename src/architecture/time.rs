@@ -1,7 +1,8 @@
 use crate::{
     architecture::{self, SpinLock},
+    cell::InitCell,
     derive_ord,
-    kernel::{Mutex, SetOnce},
+    kernel::Mutex,
 };
 use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
 use alloc::{
@@ -29,6 +30,7 @@ pub fn now() -> Duration {
 /// Initializes timer events/callbacks
 pub fn init() {
     tick::init();
+    // SAFETY: This is the init seqeunce, and so is safe
     unsafe {
         SCHEDULED_EVENTS.set(SpinLock::new(BTreeMap::new()));
     };
@@ -95,7 +97,7 @@ enum Operation {
 }
 
 /// The global queue of all scheduled events
-static SCHEDULED_EVENTS: SetOnce<SpinLock<BTreeMap<Arc<EventKey>, Operation>>> = SetOnce::new();
+static SCHEDULED_EVENTS: InitCell<SpinLock<BTreeMap<Arc<EventKey>, Operation>>> = InitCell::new();
 
 /// Schedules a one-time callback to be run after the given delay has passed
 #[allow(dead_code)]

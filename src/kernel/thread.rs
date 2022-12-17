@@ -1,7 +1,8 @@
 use crate::{
     architecture::{self, SpinLock},
     call_once, call_once_per_core,
-    kernel::{heap::FixedBlockHeap, Mutex, PerCore, SetOnce},
+    cell::InitCell,
+    kernel::{heap::FixedBlockHeap, Mutex, PerCore},
 };
 use aarch64_cpu::asm::{sev, wfe};
 use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc};
@@ -40,9 +41,9 @@ static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
 /// The number of currently running threads
 pub static ACTIVE_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// The global ready thread list
-static READY_THREADS: SetOnce<ReadyThreads> = SetOnce::new();
+static READY_THREADS: InitCell<ReadyThreads> = InitCell::new();
 /// The idle cores, one per core
-static IDLE_THREADS: SetOnce<PerCore<Arc<Thread>>> = SetOnce::new();
+static IDLE_THREADS: InitCell<PerCore<Arc<Thread>>> = InitCell::new();
 /// The static size of a stack, in bytes
 /// TODO: Convert this to a dynamic size via paging
 const STACK_SIZE: usize = 0x2000;

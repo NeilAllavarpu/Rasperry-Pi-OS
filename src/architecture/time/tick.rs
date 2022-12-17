@@ -2,14 +2,13 @@ use aarch64_cpu::{
     asm::barrier,
     registers::{CNTFRQ_EL0, CNTPCT_EL0},
 };
-use tock_registers::interfaces::Readable;
-
-/// Timer support
-use crate::kernel::SetOnce;
 use core::{
     num::{NonZeroU128, NonZeroU32},
     time::Duration,
 };
+use tock_registers::interfaces::Readable;
+
+use crate::cell::InitCell;
 
 /// The number of nanoseconds per second
 #[allow(clippy::undocumented_unsafe_blocks)]
@@ -23,11 +22,12 @@ pub struct Tick {
 }
 
 /// The frequency of the system clock, in Hz
-static FREQUENCY: SetOnce<NonZeroU32> = SetOnce::new();
+static FREQUENCY: InitCell<NonZeroU32> = InitCell::new();
 
 impl Tick {
     /// Returns the current value of the system timer, but does not necessarily
     /// Does not execute an ISB, so the timer may be read ahead of time
+    #[must_use]
     pub fn current_tick_unsync() -> Self {
         Self {
             tick: CNTPCT_EL0.get(),
@@ -35,6 +35,7 @@ impl Tick {
     }
 
     /// Returns the current value of the system timer
+    #[must_use]
     pub fn current_tick() -> Tick {
         // Prevent that the counter is read ahead of time due to out-of-order execution.
         barrier::isb(barrier::SY);
@@ -44,6 +45,7 @@ impl Tick {
 
 /// Initializes the frequency and associated constants for `Tick`s
 pub fn init() {
+    // SAFETY: This is the init sequences
     unsafe {
         FREQUENCY.set(
             u32::try_from(CNTFRQ_EL0.get())
