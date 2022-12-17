@@ -23,6 +23,7 @@ pub use spinlock::SpinLock;
 /// Must be initialized only once
 pub unsafe fn init() {
     crate::call_once!();
+    time::init();
     exception::init();
 }
 

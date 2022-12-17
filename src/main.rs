@@ -1,12 +1,17 @@
-//! The initialization sequences
-
+//! A Raspberry Pi Operating System
 #![no_main]
 #![no_std]
+#![feature(binary_heap_retain)]
+#![feature(btree_drain_filter)]
+#![feature(const_default_impls)]
+#![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
 #![feature(integer_atomics)]
+#![feature(let_chains)]
+#![feature(maybe_uninit_uninit_array)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
@@ -55,6 +60,8 @@ mod board;
 mod collections;
 /// Generic implementations
 mod kernel;
+/// Useful macros
+mod macros;
 
 #[no_mangle]
 /// The default main sequence

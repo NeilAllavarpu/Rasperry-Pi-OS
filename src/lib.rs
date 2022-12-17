@@ -1,13 +1,16 @@
-//! The initialization sequences
-
 #![no_main]
 #![no_std]
+#![feature(btree_drain_filter)]
+#![feature(const_default_impls)]
+#![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
 #![feature(integer_atomics)]
+#![feature(let_chains)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
 #![feature(once_cell)]
+#![feature(maybe_uninit_uninit_array)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
 #![feature(ptr_metadata)]
@@ -17,48 +20,39 @@
 #![test_runner(test_runner)]
 
 extern crate alloc;
-
-use alloc::sync::Arc;
-use core::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
 pub mod architecture;
 pub mod board;
 pub mod collections;
 pub mod kernel;
+pub mod macros;
 
 /// The default runner for unit tests.
 pub fn test_runner(tests: &[&TestCase]) -> ! {
-    use crate::kernel::time::now;
-
     const DEFAULT_LOOPS: u64 = 16;
     let num_loops: u64 = option_env!("LOOP")
         .and_then(|v| str::parse(v).ok())
         .unwrap_or(DEFAULT_LOOPS);
 
     for test in tests {
-        let running = Arc::new(AtomicU64::new(1));
         for i in 1..=num_loops {
-            let running_ = Arc::clone(&running);
-            let i_ = i;
+            use crate::kernel::time::now;
             let timeout = test.timeout;
 
-            // Timeout thread
-            kernel::thread::schedule(thread!(move || {
-                let start = now();
-                while running_.load(Ordering::Relaxed) == i_ {
-                    assert!(now() - start < timeout, "Test timed out");
-                    kernel::thread::switch();
-                }
-            }));
+            // Timeout callback
+            let timeout_callback = architecture::time::schedule_callback(
+                timeout,
+                alloc::boxed::Box::new(move || {
+                    panic!("Test timed out ({:#?})", timeout);
+                }),
+            );
 
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
             let start = now();
             (test.test)();
             let end = now();
-            running.fetch_add(1, Ordering::Relaxed);
+
+            architecture::time::abort_callback(timeout_callback);
 
             println!(".... PASSED: {:#?}", end - start);
         }
@@ -97,7 +91,7 @@ pub struct TestCase {
     pub test: fn(),
 
     /// Timeout for the test, defaults to 1 second
-    pub timeout: Duration,
+    pub timeout: core::time::Duration,
 }
 
 #[cfg(test)]

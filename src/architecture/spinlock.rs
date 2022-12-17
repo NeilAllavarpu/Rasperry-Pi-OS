@@ -10,13 +10,13 @@ use core::{
 };
 
 /// A spinlock mutex
-pub struct SpinLock<T> {
-    /// The protected data
-    inner: UnsafeCell<T>,
+pub struct SpinLock<T: ?Sized> {
     /// Whether or not the spinlock is taken
     is_locked: AtomicBool,
     /// State of the interrupts, prior to being locked
     guard: RefCell<MaybeUninit<exception::Guard>>,
+    /// The protected data
+    inner: UnsafeCell<T>,
 }
 
 impl<T> SpinLock<T> {
@@ -35,7 +35,7 @@ unsafe impl<T> Send for SpinLock<T> {}
 // SAFETY: The spinlock guarantees thread safety
 unsafe impl<T> Sync for SpinLock<T> {}
 
-impl<T> kernel::Mutex for SpinLock<T> {
+impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
     type State = T;
 
     fn lock(&self) -> kernel::MutexGuard<Self> {

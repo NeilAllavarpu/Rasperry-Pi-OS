@@ -68,22 +68,22 @@ fn handle_instruction_abort() {
         ESR_EL1.read(ESR_EL1::ISS)
     );
     log!("Faulting address: 0x{:->16X}", FAR_EL1.get());
-    match ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS) {
-        Some(DataAbortISS::VALID::Value::VALID) => {
-            match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
-                Some(DataAbortISS::SAS::Value::BYTE) => log!("Size: byte"),
-                Some(DataAbortISS::SAS::Value::HALFWORD) => log!("Size: halfword"),
-                Some(DataAbortISS::SAS::Value::WORD) => log!("Size: word"),
-                Some(DataAbortISS::SAS::Value::DOUBLEWORD) => log!("Size: doubleword"),
-                _ => unreachable!(),
-            }
+    if let Some(DataAbortISS::VALID::Value::VALID) =
+        ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS)
+    {
+        match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
+            Some(DataAbortISS::SAS::Value::BYTE) => log!("Size: byte"),
+            Some(DataAbortISS::SAS::Value::HALFWORD) => log!("Size: halfword"),
+            Some(DataAbortISS::SAS::Value::WORD) => log!("Size: word"),
+            Some(DataAbortISS::SAS::Value::DOUBLEWORD) => log!("Size: doubleword"),
+            _ => unreachable!(),
         }
-        _ => log!("Invalid syndrome"),
+    } else {
+        log!("Invalid syndrome");
     }
 
     match ESR_EL1.read_as_enum::<DataAbortISS::DFSC::Value>(ESR_EL1::ISS) {
         Some(DataAbortISS::DFSC::Value::ALIGNMENT_FAULT) => log!("Reason: Alignment fault"),
-
         _ => log!("Unhandled status code"),
     }
 
@@ -99,17 +99,18 @@ fn handle_data_abort() {
         ESR_EL1.read(ESR_EL1::ISS)
     );
     log!("Faulting address: 0x{:0>16X}", FAR_EL1.get());
-    match ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS) {
-        Some(DataAbortISS::VALID::Value::VALID) => {
-            match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
-                Some(DataAbortISS::SAS::Value::BYTE) => log!("Size: byte"),
-                Some(DataAbortISS::SAS::Value::HALFWORD) => log!("Size: halfword"),
-                Some(DataAbortISS::SAS::Value::WORD) => log!("Size: word"),
-                Some(DataAbortISS::SAS::Value::DOUBLEWORD) => log!("Size: doubleword"),
-                _ => unreachable!(),
-            }
+    if let Some(DataAbortISS::VALID::Value::VALID) =
+        ESR_EL1.read_as_enum::<DataAbortISS::VALID::Value>(ESR_EL1::ISS)
+    {
+        match ESR_EL1.read_as_enum::<DataAbortISS::SAS::Value>(ESR_EL1::ISS) {
+            Some(DataAbortISS::SAS::Value::BYTE) => log!("Size: byte"),
+            Some(DataAbortISS::SAS::Value::HALFWORD) => log!("Size: halfword"),
+            Some(DataAbortISS::SAS::Value::WORD) => log!("Size: word"),
+            Some(DataAbortISS::SAS::Value::DOUBLEWORD) => log!("Size: doubleword"),
+            _ => unreachable!(),
         }
-        _ => log!("Invalid syndrome"),
+    } else {
+        log!("Invalid syndrome");
     }
 
     match ESR_EL1.read_as_enum::<DataAbortISS::DFSC::Value>(ESR_EL1::ISS) {

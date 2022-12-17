@@ -22,7 +22,7 @@ add_test!(
     runs_basic_threading,
     {
         const NUM_THREADS: u64 = 1 << 16;
-        const MAX_ACTIVE: u64 = 1 << 8;
+        const MAX_ACTIVE: u64 = 60;
         let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
         for n in 0..NUM_THREADS {

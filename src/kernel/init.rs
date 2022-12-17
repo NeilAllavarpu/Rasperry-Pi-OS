@@ -59,7 +59,10 @@ unsafe fn per_core_init() -> ! {
     }
 
     log!("Enabling interrupts, I'm scared...");
-    architecture::exception::enable();
+    // SAFETY: This is the first time we are enabling exceptions
+    unsafe {
+        architecture::exception::enable();
+    }
 
     // SAFETY: It is safe to run the idle threads because the idle threads
     // have not been run yet, and will not be run any other way

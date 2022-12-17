@@ -1,8 +1,10 @@
-use crate::{architecture::machine::core_id, board::Mmio, kernel};
-use aarch64_cpu::registers::CNTP_CTL_EL0;
+use crate::{
+    architecture::{self, machine::core_id},
+    board::Mmio,
+};
 use core::ops::Deref;
 use tock_registers::{
-    interfaces::{ReadWriteable, Readable, Writeable},
+    interfaces::{Readable, Writeable},
     register_bitfields, register_structs,
     registers::{ReadOnly, WriteOnly},
 };
@@ -133,9 +135,8 @@ static VIDEOCORE_IRQ_HANDLERS: phf::Map<u32, fn() -> ()> = phf::phf_map! {
 fn handle_core_irq(interrupt_source: &ReadOnly<u32, INTERRUPT_SOURCE::Register>) {
     if interrupt_source.matches_any(INTERRUPT_SOURCE::CNT_PNS_IRQ::SET) {
         // Timer interrupt detected
-        kernel::exception::handle_timer();
+        architecture::time::handle_irq();
         // Interrupt is handled
-        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::CLEAR);
     } else if interrupt_source.matches_any(INTERRUPT_SOURCE::CORE_IRQ::SET) {
         assert!(core_id() == 0);
         // Videocore interrupt, figure out the range

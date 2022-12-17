@@ -12,9 +12,10 @@ use core::{
 const NANOSEC_PER_SEC: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1_000_000_000) };
 
 /// Encloses a clock tick value
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Tick {
     /// The tick value
-    tick: u64,
+    pub tick: u64,
 }
 
 impl Tick {

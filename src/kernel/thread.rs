@@ -55,7 +55,7 @@ static mut STACKS: FixedBlockHeap = FixedBlockHeap::new(STACK_SIZE);
 fn get_stack() -> (*mut u8, *mut u128) {
     #[allow(clippy::as_conversions)]
     let sp =
-    // SAFETY: yes
+    // SAFETY: Layout is correct
         unsafe { STACKS.alloc(STACK_LAYOUT) }
             .expect("Out of stacks!");
     // SAFETY: The passed stack pointer is correctly computed via allocation

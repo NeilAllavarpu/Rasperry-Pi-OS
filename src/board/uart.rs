@@ -118,11 +118,7 @@ impl UartInner {
     /// Reads a byte from the UART, if available
     fn read_byte(&mut self) -> Option<u8> {
         // Read one character.
-        Some(
-            (self.registers.DR.get() & 0xFF)
-                .try_into()
-                .expect("Mask should prevent overflow"),
-        )
+        u8::try_from(self.registers.DR.get() & 0xFF).ok()
     }
 
     /// hi

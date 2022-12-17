@@ -10,8 +10,3 @@ pub enum PrivilegeLevel {
     /// Unknown privilege level
     Unknown,
 }
-
-/// Handler for timer interrupts
-pub fn handle_timer() {
-    todo!();
-}

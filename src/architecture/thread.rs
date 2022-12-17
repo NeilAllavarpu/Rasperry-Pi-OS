@@ -113,3 +113,8 @@ where
         me.last_started = kernel::time::now();
     });
 }
+
+/// Preempts a thread, if preemption is not disabled
+pub fn preempt() {
+    // TODO
+}
