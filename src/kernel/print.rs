@@ -28,7 +28,7 @@ macro_rules! println {
 macro_rules! log {
     ($string:expr) => ({
         use core::time::Duration;
-        let timestamp: Duration = $crate::kernel::time::now();
+        let timestamp: Duration = $crate::architecture::time::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $string),
@@ -39,7 +39,7 @@ macro_rules! log {
     });
     ($format_string:expr, $($arg:tt)*) => ({
         use core::time::Duration;
-        let timestamp: Duration = $crate::kernel::time::now();
+        let timestamp: Duration = $crate::architecture::time::now();
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $format_string),

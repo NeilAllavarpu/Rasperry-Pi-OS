@@ -18,8 +18,6 @@ pub mod print;
 pub mod serial;
 /// Threading
 pub mod thread;
-/// Clock and timer functions
-pub mod time;
 
 pub use init::init;
 pub use mutex::Guard as MutexGuard;

@@ -1,12 +1,9 @@
 use crate::{
     architecture::{self, SpinLock},
     derive_ord,
-    kernel::{time::Tick, Mutex, SetOnce},
+    kernel::{Mutex, SetOnce},
 };
-use aarch64_cpu::{
-    asm::barrier,
-    registers::{CNTFRQ_EL0, CNTPCT_EL0, CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1},
-};
+use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -15,36 +12,23 @@ use alloc::{
 use core::{
     cmp::min,
     mem::MaybeUninit,
-    num::NonZeroU32,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
-/// Returns the frequency of the system timer, in Hz
-pub fn frequency() -> NonZeroU32 {
-    // The upper 32 bits are reserved to 0
-    u32::try_from(CNTFRQ_EL0.get())
-        .expect("The clock frequency should fit into 32 bits")
-        .try_into()
-        .expect("The clock frequency should not be 0")
-}
+/// Wrapper class for raw ticks
+mod tick;
+use tick::Tick;
 
-/// Returns the current value of the system timer
-pub fn current_tick() -> Tick {
-    // Prevent that the counter is read ahead of time due to out-of-order execution.
-    barrier::isb(barrier::SY);
-    Tick::new(CNTPCT_EL0.get())
-}
-
-/// Returns the current value of the system timer, but does not necessarily
-/// Does not execute an ISB, so the timer may be read ahead of time
-fn current_tick_unsync() -> Tick {
-    Tick::new(CNTPCT_EL0.get())
+/// Returns the current time
+pub fn now() -> Duration {
+    Tick::current_tick().into()
 }
 
 /// Initializes timer events/callbacks
 pub fn init() {
+    tick::init();
     unsafe {
         SCHEDULED_EVENTS.set(SpinLock::new(BTreeMap::new()));
     };
@@ -54,7 +38,7 @@ pub fn init() {
 
 /// Sets the timer to trigger an interrupt at time `when`
 fn enable_next_timer_irq(when: Tick) {
-    CNTP_CVAL_EL0.set(when.tick);
+    CNTP_CVAL_EL0.set(when.into());
     CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
 }
 
@@ -73,21 +57,19 @@ impl EventKey {
     /// Creates a new `EventKey` with a unique ID
     fn new(tick: Tick) -> Self {
         Self {
-            time: AtomicU64::new(tick.tick),
+            time: AtomicU64::new(tick.into()),
             id: NEXT_EVENT_ID.fetch_add(1, Ordering::Relaxed),
         }
     }
 
     /// Advances the key's `time` by the given amount
     fn advance_by(&self, amount: Tick) {
-        self.time.fetch_add(amount.tick, Ordering::Relaxed);
+        self.time.fetch_add(amount.into(), Ordering::Relaxed);
     }
 
     /// Returns the `Tick` at which this event will occur
     fn tick(&self) -> Tick {
-        Tick {
-            tick: self.time.load(Ordering::Relaxed),
-        }
+        self.time.load(Ordering::Relaxed).into()
     }
 }
 
@@ -119,7 +101,11 @@ static SCHEDULED_EVENTS: SetOnce<SpinLock<BTreeMap<Arc<EventKey>, Operation>>> =
 #[allow(dead_code)]
 pub fn schedule_callback(delay: Duration, callback: Box<dyn FnOnce()>) -> Weak<EventKey> {
     add_event(
-        EventKey::new(current_tick() + delay.try_into().expect("Delay should not overflow")),
+        EventKey::new(
+            (now() + delay)
+                .try_into()
+                .expect("Delay should not overflow"),
+        ),
         Operation::Callback(callback),
     )
 }
@@ -129,14 +115,16 @@ pub fn schedule_callback(delay: Duration, callback: Box<dyn FnOnce()>) -> Weak<E
 pub fn schedule_periodic_callback(
     period: Duration,
     callback: Arc<SpinLock<dyn FnMut()>>,
-) -> Weak<EventKey> {
-    add_event(
-        EventKey::new(current_tick()),
-        Operation::PeriodicCallback(
-            callback,
-            period.try_into().expect("Period should not overflow"),
-        ),
-    )
+) -> Option<Weak<EventKey>> {
+    period.try_into().ok().map(|tick| {
+        add_event(
+            EventKey::new(tick),
+            Operation::PeriodicCallback(
+                callback,
+                period.try_into().expect("Period should not overflow"),
+            ),
+        )
+    })
 }
 
 /// Adds an event to the scheduling list
@@ -196,7 +184,7 @@ pub fn handle_irq() {
         {
             let mut events = SCHEDULED_EVENTS.lock();
 
-            for entry in events.drain_filter(|key, _| key.tick() <= current_tick_unsync()) {
+            for entry in events.drain_filter(|key, _| key.tick() <= Tick::current_tick_unsync()) {
                 *to_run
                     .get_mut(num_elems)
                     .expect("Index should be in bounds") = MaybeUninit::new(entry);

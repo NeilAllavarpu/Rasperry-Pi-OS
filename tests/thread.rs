@@ -41,5 +41,5 @@ add_test!(
 
         assert!(counter.load(Ordering::Relaxed) == NUM_THREADS);
     },
-    Duration::from_millis(1100)
+    Duration::from_millis(1200)
 );

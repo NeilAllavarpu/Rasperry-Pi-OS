@@ -1,7 +1,4 @@
-use crate::{
-    architecture,
-    kernel::{self, thread::Thread},
-};
+use crate::{architecture, kernel::thread::Thread};
 use aarch64_cpu::registers::TPIDR_EL1;
 use alloc::sync::Arc;
 use core::{
@@ -97,7 +94,7 @@ where
     Callback: FnMut(Arc<Thread>),
 {
     me(|me| {
-        me.runtime += kernel::time::now() - me.last_started;
+        me.runtime += architecture::time::now() - me.last_started;
         let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
             ptr::addr_of_mut!(callback).to_raw_parts();
         // # SAFETY: The parameters are correctly set up and passed to context switching
@@ -110,7 +107,7 @@ where
                 invoke_callback::<Callback>,
             );
         }
-        me.last_started = kernel::time::now();
+        me.last_started = architecture::time::now();
     });
 }
 

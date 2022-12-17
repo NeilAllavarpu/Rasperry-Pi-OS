@@ -35,7 +35,7 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
 
     for test in tests {
         for i in 1..=num_loops {
-            use crate::kernel::time::now;
+            use crate::architecture::time::now;
             let timeout = test.timeout;
 
             // Timeout callback
