@@ -4,6 +4,7 @@ use aarch64_cpu::{
 };
 use core::{
     num::{NonZeroU128, NonZeroU32},
+    ops::Add,
     time::Duration,
 };
 use tock_registers::interfaces::Readable;
@@ -16,22 +17,17 @@ const NANOSEC_PER_SEC: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1_000_000
 
 /// Encloses a clock tick value
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Tick {
-    /// The tick value
-    tick: u64,
-}
+pub struct Tick(u64);
 
 /// The frequency of the system clock, in Hz
 static FREQUENCY: InitCell<NonZeroU32> = InitCell::new();
 
 impl Tick {
-    /// Returns the current value of the system timer, but does not necessarily
+    /// Returns the current value of the system timer
     /// Does not execute an ISB, so the timer may be read ahead of time
     #[must_use]
     pub fn current_tick_unsync() -> Self {
-        Self {
-            tick: CNTPCT_EL0.get(),
-        }
+        Self(CNTPCT_EL0.get())
     }
 
     /// Returns the current value of the system timer
@@ -41,6 +37,15 @@ impl Tick {
         barrier::isb(barrier::SY);
         Self::current_tick_unsync()
     }
+}
+
+impl Add for Tick {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+    // pu
 }
 
 /// Initializes the frequency and associated constants for `Tick`s
@@ -57,9 +62,9 @@ pub fn init() {
 }
 
 impl From<Tick> for Duration {
-    fn from(tick: Tick) -> Self {
-        let nanoseconds: u128 = u128::from(tick.tick) * u128::from(NANOSEC_PER_SEC.get())
-            / NonZeroU128::from(*FREQUENCY);
+    fn from(Tick(tick): Tick) -> Self {
+        let nanoseconds: u128 =
+            u128::from(tick) * u128::from(NANOSEC_PER_SEC.get()) / NonZeroU128::from(*FREQUENCY);
 
         Self::new(
             (nanoseconds / NonZeroU128::from(NANOSEC_PER_SEC))
@@ -82,19 +87,19 @@ impl TryFrom<Duration> for Tick {
         )
         .map_or(
             Err("Duration is too large to represent with the given timer"),
-            |tick| Ok(Tick { tick }),
+            |tick| Ok(Tick(tick)),
         )
     }
 }
 
 impl const From<Tick> for u64 {
-    fn from(tick: Tick) -> Self {
-        tick.tick
+    fn from(Tick(tick): Tick) -> Self {
+        tick
     }
 }
 
 impl const From<u64> for Tick {
     fn from(tick: u64) -> Self {
-        Self { tick }
+        Self(tick)
     }
 }

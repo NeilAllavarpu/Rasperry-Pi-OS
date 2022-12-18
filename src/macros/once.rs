@@ -1,3 +1,5 @@
+use core::sync::atomic::AtomicBool;
+
 /// Ensures that the given function is only called once
 /// Panics if run more than once
 #[allow(clippy::module_name_repetitions)]
@@ -10,15 +12,25 @@ macro_rules! call_once {
     }};
 }
 
+/// Helper function to create idle threads.
+/// For some reason, an inline closure is not being considered `const`...
+///
+/// TODO: Replace this with `const` closures if those are made available
+pub const fn _create_idle_percore() -> AtomicBool {
+    AtomicBool::new(true)
+}
+
 /// Ensures that the given function is only called once per core
 /// Panics if run more than once on any given core
 #[macro_export]
 macro_rules! call_once_per_core {
     () => {{
+        use core::sync::atomic::{AtomicBool, Ordering};
         use $crate::kernel::PerCore;
-        static IS_CORE_FIRST_INVOCATION: PerCore<bool> = PerCore::new(true);
-        assert!(
-            IS_CORE_FIRST_INVOCATION.with_current(|is_first| core::mem::replace(is_first, false))
-        )
+        static IS_CORE_FIRST_INVOCATION: PerCore<AtomicBool> =
+            PerCore::new($crate::macros::once::_create_idle_percore);
+        assert!(IS_CORE_FIRST_INVOCATION
+            .current()
+            .swap(false, Ordering::Relaxed));
     }};
 }

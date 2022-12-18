@@ -19,12 +19,7 @@ pub fn el() -> PrivilegeLevel {
 }
 
 /// Initializes certain exceptions
-pub fn init() {
-    // Turn on alignment checks
-    SCTLR_EL1.modify(SCTLR_EL1::A::Enable + SCTLR_EL1::NAA::Enable + SCTLR_EL1::SA::Enable);
-    // Enable timer exceptions
-    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
-}
+pub fn init() {}
 
 /// Ready exception handling by setting the exception vector base address register.
 pub fn per_core_init() {
@@ -40,6 +35,11 @@ pub fn per_core_init() {
 
     // Force VBAR update to complete before next instruction.
     barrier::isb(barrier::SY);
+
+    // Turn on alignment checks
+    SCTLR_EL1.modify(SCTLR_EL1::A::Enable + SCTLR_EL1::NAA::Enable + SCTLR_EL1::SA::Enable);
+    // Enable timer exceptions
+    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
 }
 
 /// Checks if exceptions are fully disabled

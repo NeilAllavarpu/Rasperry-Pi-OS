@@ -2,6 +2,7 @@
 #![no_std]
 #![feature(btree_drain_filter)]
 #![feature(const_default_impls)]
+#![feature(const_refs_to_cell)]
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
@@ -40,12 +41,13 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
             let timeout = test.timeout;
 
             // Timeout callback
-            let timeout_callback = architecture::time::schedule_callback(
+            let timeout_handle = architecture::time::schedule_callback(
                 timeout,
                 alloc::boxed::Box::new(move || {
                     panic!("Test timed out ({:#?})", timeout);
                 }),
-            );
+            )
+            .expect("Test should not run extremely long");
 
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
@@ -53,7 +55,7 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
             (test.test)();
             let end = now();
 
-            architecture::time::abort_callback(timeout_callback);
+            timeout_handle.abort();
 
             println!(".... PASSED: {:#?}", end - start);
         }

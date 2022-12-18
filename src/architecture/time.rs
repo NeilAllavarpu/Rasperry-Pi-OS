@@ -2,18 +2,18 @@ use crate::{
     architecture::{self, SpinLock},
     cell::InitCell,
     derive_ord,
-    kernel::Mutex,
+    kernel::{Mutex, PerCore},
 };
 use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
 use alloc::{
     boxed::Box,
-    collections::BTreeMap,
+    collections::BinaryHeap,
     sync::{Arc, Weak},
 };
 use core::{
-    cmp::min,
+    cmp::Reverse,
     mem::MaybeUninit,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
@@ -21,6 +21,10 @@ use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 /// Wrapper class for raw ticks
 mod tick;
 use tick::Tick;
+/// Timer IRQ disabling guard. Enables safe mutual exclusion for a `PerCore`
+/// object here, when the `PerCore` is accessed inside the IRQ handler
+mod timer_irq_lock;
+use timer_irq_lock::TimerIrqGuard;
 
 /// Returns the current time
 pub fn now() -> Duration {
@@ -32,61 +36,13 @@ pub fn init() {
     tick::init();
     // SAFETY: This is the init seqeunce, and so is safe
     unsafe {
-        SCHEDULED_EVENTS.set(SpinLock::new(BTreeMap::new()));
+        SCHEDULED_EVENTS.set(PerCore::new(BinaryHeap::new));
     };
 }
 
 /// Timer scheduling ///
-
-/// Sets the timer to trigger an interrupt at time `when`
-fn enable_next_timer_irq(when: Tick) {
-    CNTP_CVAL_EL0.set(when.into());
-    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
-}
-
-/// The ID of the next created event
-static NEXT_EVENT_ID: AtomicU64 = AtomicU64::default();
-
-/// A key to identify an event
-pub struct EventKey {
-    /// The time at which to trigger this event
-    time: AtomicU64,
-    /// The ID of the event
-    id: u64,
-}
-
-impl EventKey {
-    /// Creates a new `EventKey` with a unique ID
-    fn new(tick: Tick) -> Self {
-        Self {
-            time: AtomicU64::new(tick.into()),
-            id: NEXT_EVENT_ID.fetch_add(1, Ordering::Relaxed),
-        }
-    }
-
-    /// Advances the key's `time` by the given amount
-    fn advance_by(&self, amount: Tick) {
-        self.time.fetch_add(amount.into(), Ordering::Relaxed);
-    }
-
-    /// Returns the `Tick` at which this event will occur
-    fn tick(&self) -> Tick {
-        self.time.load(Ordering::Relaxed).into()
-    }
-}
-
-derive_ord!(EventKey);
-
-impl Ord for EventKey {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        let comparison = self.tick().cmp(&other.tick());
-        if comparison.is_eq() {
-            self.id.cmp(&other.id)
-        } else {
-            comparison
-        }
-    }
-}
+/// The global queue of all scheduled events
+static SCHEDULED_EVENTS: InitCell<PerCore<BinaryHeap<Reverse<Event>>>> = InitCell::new();
 
 /// An operation to be run when an event is scheduled
 enum Operation {
@@ -96,20 +52,67 @@ enum Operation {
     PeriodicCallback(Arc<SpinLock<dyn FnMut()>>, Tick),
 }
 
-/// The global queue of all scheduled events
-static SCHEDULED_EVENTS: InitCell<SpinLock<BTreeMap<Arc<EventKey>, Operation>>> = InitCell::new();
+/// A key to identify an event
+struct Event {
+    /// When this event is scheduled to fire
+    when: Tick,
+    /// Whether or not this event is still active
+    active: Arc<AtomicBool>,
+    /// The operation to run when scheduled
+    operation: Operation,
+}
+
+impl Event {
+    /// Creates a new `EventKey` with a unique ID
+    fn new(when: Tick, operation: Operation) -> Self {
+        Self {
+            when,
+            active: Arc::new(AtomicBool::new(true)),
+            operation,
+        }
+    }
+
+    /// Creates a handle for this event
+    fn create_handle(&self) -> EventHandle {
+        EventHandle(Arc::downgrade(&self.active))
+    }
+}
+
+derive_ord!(Event);
+
+impl Ord for Event {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.when.cmp(&other.when)
+    }
+}
+
+/// A handle for a scheduled callback. Can be used to cancel the event
+pub struct EventHandle(Weak<AtomicBool>);
+
+impl EventHandle {
+    /// Aborts the scheduled callback
+    #[allow(dead_code)]
+    pub fn abort(self) {
+        if let Some(active) = Weak::upgrade(&self.0) {
+            active.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Sets the timer to trigger an interrupt at time `when`
+fn enable_next_timer_irq(when: Tick) {
+    CNTP_CVAL_EL0.set(when.into());
+    CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
+}
 
 /// Schedules a one-time callback to be run after the given delay has passed
 #[allow(dead_code)]
-pub fn schedule_callback(delay: Duration, callback: Box<dyn FnOnce()>) -> Weak<EventKey> {
-    add_event(
-        EventKey::new(
-            (now() + delay)
-                .try_into()
-                .expect("Delay should not overflow"),
-        ),
-        Operation::Callback(callback),
-    )
+pub fn schedule_callback(
+    delay: Duration,
+    callback: Box<dyn FnOnce()>,
+) -> Result<EventHandle, <Tick as TryFrom<Duration>>::Error> {
+    let tick = (now() + delay).try_into()?;
+    Ok(add_event(tick, Operation::Callback(callback)))
 }
 
 /// Schedules a periodic time callback to be run once per period
@@ -117,43 +120,33 @@ pub fn schedule_callback(delay: Duration, callback: Box<dyn FnOnce()>) -> Weak<E
 pub fn schedule_periodic_callback(
     period: Duration,
     callback: Arc<SpinLock<dyn FnMut()>>,
-) -> Option<Weak<EventKey>> {
-    period.try_into().ok().map(|tick| {
-        add_event(
-            EventKey::new(tick),
-            Operation::PeriodicCallback(
-                callback,
-                period.try_into().expect("Period should not overflow"),
-            ),
-        )
-    })
+) -> Result<EventHandle, <Tick as TryFrom<Duration>>::Error> {
+    let tick = period.try_into()?;
+    Ok(add_event(
+        tick,
+        Operation::PeriodicCallback(
+            callback,
+            period.try_into().expect("Period should not overflow"),
+        ),
+    ))
 }
 
 /// Adds an event to the scheduling list
-fn add_event(key: EventKey, operation: Operation) -> Weak<EventKey> {
-    let strong_key = Arc::new(key);
-    let weak_key = Arc::downgrade(&strong_key);
-    let mut events = SCHEDULED_EVENTS.lock();
-    let new_timer = if let Some((prev_min, _)) = events.first_key_value() {
-        min(prev_min.tick(), strong_key.tick())
-    } else {
-        strong_key.tick()
-    };
-    events.insert(strong_key, operation);
-    drop(events);
-    enable_next_timer_irq(new_timer);
-    weak_key
-}
+fn add_event(when: Tick, operation: Operation) -> EventHandle {
+    let event = Event::new(when, operation);
+    let handle = event.create_handle();
+    {
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::SET);
 
-/// Aborts the callback corresponding to the given ID
-#[allow(dead_code)]
-pub fn abort_callback(key: Weak<EventKey>) {
-    if let Some(strong_key) = Weak::upgrade(&key) {
-        SCHEDULED_EVENTS.lock().remove(&strong_key);
+        let _irq_guard = TimerIrqGuard::new();
+        let mut events = SCHEDULED_EVENTS.current();
+        events.push(Reverse(event));
+        if let Some(Reverse(min_event)) = events.peek() {
+            enable_next_timer_irq(min_event.when);
+        }
+        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
     }
-    // Explicitly drop the key, because it is no longer valid:
-    // either the event was deregistered, or the event was no longer valid anyways
-    drop(key);
+    handle
 }
 
 /// Handles a timer IRQ
@@ -170,29 +163,40 @@ pub fn handle_irq() {
         architecture::exception::enable();
     }
 
-    // Only one core shall handle general timer interrutps
-    if architecture::machine::core_id() == 0 {
+    {
+        // Only one core shall handle general timer interrutps
+        // if architecture::machine::core_id() == 0 {
         /// TODO: Ideally, we would be able to `drain_filter` all matching events
         /// into a (variably sized) stack-allocated slice/array. However for some
         /// reason I can't seem to get this to work, so here's a temporary hack to
         /// make it work. Will panic if there are too many scheduled events to run
         const MAX_ELEMS: usize = 64;
 
-        let mut to_run: [MaybeUninit<(Arc<EventKey>, Operation)>; MAX_ELEMS] =
-            MaybeUninit::uninit_array();
+        let mut to_run: [MaybeUninit<Event>; MAX_ELEMS] = MaybeUninit::uninit_array();
         let mut num_elems = 0;
         // Copy any pending events to a local state, so that we don't have to
         // hold the scheduler lock while running events
         {
-            let mut events = SCHEDULED_EVENTS.lock();
+            let _irq_guard = TimerIrqGuard::new();
+            let mut events = SCHEDULED_EVENTS.current();
 
-            for entry in events.drain_filter(|key, _| key.tick() <= Tick::current_tick_unsync()) {
-                *to_run
-                    .get_mut(num_elems)
-                    .expect("Index should be in bounds") = MaybeUninit::new(entry);
-                num_elems += 1;
+            while let Some(Reverse(event)) = events.pop() {
+                // Only handle the event if still active; otherwise, drop the event
+                if event.active.load(Ordering::Relaxed) {
+                    if event.when < Tick::current_tick_unsync() {
+                        // Time condition has been met, schedule the event
+                        *to_run
+                            .get_mut(num_elems)
+                            .expect("Index should be in bounds") = MaybeUninit::new(event);
+                        num_elems += 1;
+                    } else {
+                        // Time condition not met, re-add the element and break out
+                        events.push(Reverse(event));
+                        break;
+                    }
+                }
             }
-            if let Some(next_event_tick) = events.first_key_value().map(|(key, _)| key.tick()) {
+            if let Some(next_event_tick) = events.peek().map(|Reverse(event)| event.when) {
                 enable_next_timer_irq(next_event_tick);
             }
         }
@@ -203,26 +207,24 @@ pub fn handle_irq() {
             num_elems -= 1;
             // SAFETY: We manually construct the array so that the first `num_elem`
             // elements are initialized
-            let (key, operation) = unsafe { elem.assume_init() };
-            match operation {
+            let event = unsafe { elem.assume_init() };
+            match event.operation {
                 Operation::Callback(callback) => {
                     callback.call_once(());
                 }
                 Operation::PeriodicCallback(callback, period) => {
-                    key.advance_by(period);
+                    let next_event = Event::new(
+                        event.when + period,
+                        Operation::PeriodicCallback(Arc::clone(&callback), period),
+                    );
                     {
-                        SCHEDULED_EVENTS.lock().insert(
-                            key,
-                            Operation::PeriodicCallback(Arc::clone(&callback), period),
-                        );
+                        let _irq_guard = TimerIrqGuard::new();
+                        SCHEDULED_EVENTS.current().push(Reverse(next_event));
                     }
                     callback.lock().call_mut(());
                 }
             }
         }
-    } else {
-        // For all other cores, a timer interrupt indicates preemption
-        architecture::thread::preempt();
     }
 
     // SAFETY: `eret` will re-enable exceptions. We need to disable them briefly

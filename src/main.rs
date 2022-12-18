@@ -4,6 +4,7 @@
 #![feature(binary_heap_retain)]
 #![feature(btree_drain_filter)]
 #![feature(const_default_impls)]
+#![feature(const_refs_to_cell)]
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]

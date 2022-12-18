@@ -28,6 +28,8 @@ pub struct Thread {
     pub last_started: Duration,
     /// The work this thread is running
     pub work: Box<dyn FnMut()>,
+    /// Whether or not this thread is preemptible
+    pub preemptible: bool,
 }
 
 /// The list of ready threads, sorted by runtime
@@ -97,6 +99,7 @@ impl Thread {
             last_started: Duration::default(),
             allocated_sp,
             sp,
+            preemptible: true,
         })
     }
 
@@ -119,7 +122,7 @@ pub fn stop() -> ! {
     architecture::thread::context_switch(
         READY_THREADS
             .get()
-            .unwrap_or_else(|| IDLE_THREADS.with_current(|idle| Arc::clone(idle))),
+            .unwrap_or_else(|| Arc::clone(&*IDLE_THREADS.current())),
         |me| {
             let allocated_sp = me.allocated_sp;
             ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
@@ -203,12 +206,7 @@ pub unsafe fn init() {
         READY_THREADS.set(ReadyThreads {
             threads: SpinLock::new(BinaryHeap::new()),
         });
-        IDLE_THREADS.set(PerCore::new_from_array([
-            thread!(idle_loop),
-            thread!(idle_loop),
-            thread!(idle_loop),
-            thread!(idle_loop),
-        ]));
+        IDLE_THREADS.set(PerCore::new(|| thread!(idle_loop)));
     }
     // Don't count the idle threads as active threads
     ACTIVE_THREAD_COUNT.store(0, Ordering::Relaxed);
@@ -219,7 +217,6 @@ pub unsafe fn init() {
 /// Must only be called once on each core, at the appropriate time
 pub unsafe fn per_core_init() {
     call_once_per_core!();
-    IDLE_THREADS.with_current(|idle|
-        // SAFETY: This is only run once per-core
-        unsafe { architecture::thread::set_me(Arc::clone(idle)) });
+    // SAFETY: This is only run once per-core
+    unsafe { architecture::thread::set_me(Arc::clone(&*IDLE_THREADS.current())) };
 }
