@@ -1,8 +1,6 @@
 //! A Raspberry Pi Operating System
 #![no_main]
 #![no_std]
-#![feature(binary_heap_retain)]
-#![feature(btree_drain_filter)]
 #![feature(const_default_impls)]
 #![feature(const_refs_to_cell)]
 #![feature(const_trait_impl)]
@@ -18,7 +16,6 @@
 #![feature(pointer_byte_offsets)]
 #![feature(ptr_metadata)]
 #![feature(ptr_to_from_bits)]
-#![feature(stmt_expr_attributes)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(_test_runner)]
 #![forbid(unsafe_op_in_unsafe_fn)]
@@ -65,6 +62,8 @@ mod collections;
 mod kernel;
 /// Useful macros
 mod macros;
+/// Synchronization primitives
+mod sync;
 
 #[no_mangle]
 /// The default main sequence

@@ -1,17 +1,16 @@
 #![no_main]
 #![no_std]
-#![feature(btree_drain_filter)]
 #![feature(const_default_impls)]
 #![feature(const_refs_to_cell)]
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
-#![feature(integer_atomics)]
-#![feature(let_chains)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
-#![feature(once_cell)]
+#![feature(integer_atomics)]
+#![feature(let_chains)]
 #![feature(maybe_uninit_uninit_array)]
+#![feature(once_cell)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
 #![feature(ptr_metadata)]
@@ -27,6 +26,7 @@ pub mod cell;
 pub mod collections;
 pub mod kernel;
 pub mod macros;
+pub mod sync;
 
 /// The default runner for unit tests.
 pub fn test_runner(tests: &[&TestCase]) -> ! {
