@@ -1,7 +1,5 @@
-use core::{
-    marker::PhantomData,
-    sync::atomic::{AtomicU128, Ordering},
-};
+use crate::sync::AtomicStampedPtr;
+use core::sync::atomic::Ordering;
 
 /// Trait for items that can be put into `Stack`s or `BoxStack`s
 pub trait Stackable {
@@ -19,66 +17,43 @@ pub trait Stackable {
 /// A lock-free thread-safe linked-list intrusive stack
 ///
 /// DOES NOT DEAL PROPERLY WITH DROPPING
-pub struct Stack<T: Stackable> {
-    /// The top of the stack + a counter to address ABA problems
-    top_and_counter: AtomicU128,
-    /// Marker for the type
-    phantom: PhantomData<T>,
+#[allow(clippy::module_name_repetitions)]
+pub struct UnsafeStack<T: Stackable> {
+    /// The top of the stack + a stamp to address ABA problems
+    top: AtomicStampedPtr<T>,
 }
 
-impl<T: Stackable> Stack<T> {
-    /// Extracts the top pointer and the counter separately, from a combined u128
-    fn extract_parts(top_and_counter: u128) -> (*mut T, u64) {
-        (
-            <*mut T>::from_bits(
-                (top_and_counter & ((1 << 64) - 1))
-                    .try_into()
-                    .expect("Top pointer should not overflow"),
-            ),
-            (top_and_counter >> 64)
-                .try_into()
-                .expect("Counter should not overflow"),
-        )
-    }
-
-    /// Combines a top pointer and a counter into a u128
-    fn combine_parts(top: *mut T, counter: u64) -> u128 {
-        u128::try_from(top.to_bits()).expect("Top pointer should fit into 128 bits")
-            | (u128::from(counter) << 64)
-    }
-
+impl<T: Stackable> UnsafeStack<T> {
     /// Creates a new, empty stack
     pub const fn new() -> Self {
         Self {
-            top_and_counter: AtomicU128::new(0),
-            phantom: PhantomData,
+            top: AtomicStampedPtr::default(),
         }
     }
 
     /// Adds an element to the top of the stack
-    pub fn push(&self, value: &mut T) {
-        self.top_and_counter
-            .fetch_update(Ordering::Release, Ordering::Acquire, |top_and_counter| {
-                let (top, counter) = Self::extract_parts(top_and_counter);
+    /// # Safety
+    /// `value` must point to a pinned object that will not be deallocated
+    pub unsafe fn push(&self, value: *mut T) {
+        self.top
+            .fetch_update_unstamped(Ordering::Release, Ordering::Acquire, |top| {
                 // SAFETY: This is the only valid place to use this method
-                unsafe { value.set_next(top) };
-                Some(Self::combine_parts(value, counter + 1))
+                // By assumption, `value` is valid
+                unsafe { (*value).set_next(top) };
+                Some(value)
             })
             .expect("Should never return `None`");
     }
 
     /// Removes the first element from the top of the stack
-    pub fn pop(&self) -> Option<&mut T> {
-        self.top_and_counter
-            .fetch_update(Ordering::Relaxed, Ordering::Acquire, |top_and_counter| {
-                let (top_ptr, counter) = Self::extract_parts(top_and_counter);
+    pub fn pop(&self) -> Option<*mut T> {
+        self.top
+            .fetch_update_stamped(Ordering::Relaxed, Ordering::Acquire, |top, stamp| {
                 // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
-                unsafe { top_ptr.as_mut() }.map(|top| Self::combine_parts(top.read_next(), counter))
+                unsafe { top.as_ref() }.map(|top_ref| (top_ref.read_next(), stamp + 1))
             })
             .ok()
-            .and_then(|top|
-                // SAFETY: Either `top_ptr` is null, or this points to a valid T as set by `push`
-                unsafe { Self::extract_parts(top).0.as_mut() })
+            .map(|(top, _)| top)
     }
 
     /// Computes the current depth of the the stack, for logging purposes
@@ -87,7 +62,7 @@ impl<T: Stackable> Stack<T> {
     /// # Safety
     /// Use *only* for logging purposes
     pub unsafe fn depth(&self) -> usize {
-        let (mut ptr, _) = Self::extract_parts(self.top_and_counter.load(Ordering::Acquire));
+        let mut ptr = self.top.load_unstamped(Ordering::Acquire);
         let mut depth: usize = 0;
         // SAFETY: `ptr` is obtained from the existing stack list,
         // and must be valid via `push`
@@ -100,6 +75,6 @@ impl<T: Stackable> Stack<T> {
 }
 
 /// SAFETY: By construction, these stacks are thread-safe
-unsafe impl<T: Stackable> Send for Stack<T> {}
+unsafe impl<T: Stackable> Send for UnsafeStack<T> {}
 /// SAFETY: By construction, these stacks are thread-safe
-unsafe impl<T: Stackable> Sync for Stack<T> {}
+unsafe impl<T: Stackable> Sync for UnsafeStack<T> {}

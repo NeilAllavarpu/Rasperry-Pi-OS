@@ -31,7 +31,7 @@ impl collections::Stackable for FreeBlock {
 #[allow(clippy::module_name_repetitions)]
 pub struct FixedBlockHeap {
     /// The next free block in the heap
-    first_free: collections::Stack<FreeBlock>,
+    first_free: collections::UnsafeStack<FreeBlock>,
     /// Block size, in bytes
     block_size: usize,
     /// The size of the heap
@@ -43,7 +43,7 @@ impl FixedBlockHeap {
     /// Should not be used until initialized
     pub const fn new(block_size: usize) -> Self {
         Self {
-            first_free: collections::Stack::new(),
+            first_free: collections::UnsafeStack::new(),
             block_size,
             size: 0,
         }
@@ -57,21 +57,17 @@ impl FixedBlockHeap {
             return None;
         }
         #[allow(clippy::as_conversions)]
-        self.first_free
-            .pop()
-            .map(|block| (block as *mut FreeBlock).cast())
+        self.first_free.pop().map(<*mut FreeBlock>::cast)
     }
 
     /// # Safety
     /// Implements `GlobalAlloc`'s `dealloc`
     pub unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) {
-        self.first_free.push(
-            #[allow(clippy::cast_ptr_alignment)]
-            // SAFETY: By assumption, `ptr` was returned from `alloc`, and so
-            // respects proper placement and alignment
-            unsafe { ptr.cast::<FreeBlock>().as_mut() }
-                .expect("Casting the dealloc pointer to a FreeBlock should succeed"),
-        );
+        // SAFETY: By assumption, `ptr` was returned from `alloc`, and so
+        // respects proper placement and alignment
+        unsafe {
+            self.first_free.push(ptr.cast());
+        }
     }
 
     /// Initializes the heap over the given range of memory
@@ -81,12 +77,12 @@ impl FixedBlockHeap {
         assert!(self.block_size.is_power_of_two());
 
         for block_offset in (0..size).step_by(self.block_size) {
-            self.first_free.push(
-                // SAFETY: By construction, these pointers are all valid pointers
-                // to unused heap space
-                unsafe { start.byte_add(block_offset).cast::<FreeBlock>().as_mut() }
-                    .expect("Casting the pointer to a reference should succeed"),
-            );
+            // SAFETY: By construction, these pointers are all valid pointers
+            // to unused, fixed heap space
+            unsafe {
+                self.first_free
+                    .push(start.byte_add(block_offset).cast::<FreeBlock>());
+            }
         }
 
         self.size = size;
