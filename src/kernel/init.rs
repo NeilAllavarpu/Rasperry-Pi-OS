@@ -54,8 +54,8 @@ unsafe fn per_core_init() -> ! {
 
     // SAFETY: Only runs once per core
     unsafe {
-        architecture::per_core_init();
         kernel::thread::per_core_init();
+        architecture::per_core_init();
     }
 
     log!("Enabling interrupts, I'm scared...");

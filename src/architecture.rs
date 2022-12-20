@@ -33,6 +33,7 @@ pub unsafe fn init() {
 pub unsafe fn per_core_init() {
     crate::call_once_per_core!();
     exception::per_core_init();
+    time::per_core_init();
 }
 
 #[cfg(not(target_pointer_width = "64"))]

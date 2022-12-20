@@ -9,6 +9,7 @@
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
+#![feature(duration_constants)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
 #![feature(integer_atomics)]

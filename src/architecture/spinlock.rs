@@ -63,7 +63,7 @@ impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
     unsafe fn unlock(&self) {
         // SAFETY: `guard` was set by `lock` and so must be valid
         let _guard = unsafe { self.guard.borrow_mut().assume_init_read() };
-        self.is_locked.store(false, Ordering::Release);
+        assert!(self.is_locked.swap(false, Ordering::Release));
         sev();
     }
 }

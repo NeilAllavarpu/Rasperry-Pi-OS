@@ -1,4 +1,7 @@
-use crate::{architecture, kernel::thread::Thread};
+use crate::{
+    architecture,
+    kernel::{self, thread::Thread},
+};
 use aarch64_cpu::registers::TPIDR_EL1;
 use alloc::sync::Arc;
 use core::{
@@ -97,7 +100,7 @@ where
         me.runtime += architecture::time::now() - me.last_started;
         let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
             ptr::addr_of_mut!(callback).to_raw_parts();
-        // # SAFETY: The parameters are correctly set up and passed to context switching
+        // SAFETY: The parameters are correctly set up and passed to context switching
         unsafe {
             #[allow(clippy::as_conversions)]
             _context_switch(
@@ -107,11 +110,18 @@ where
                 invoke_callback::<Callback>,
             );
         }
+        assert!(me.preemptible || me.id <= 4);
         me.last_started = architecture::time::now();
     });
 }
 
 /// Preempts a thread, if preemption is not disabled
 pub fn preempt() {
-    // TODO
+    me(|me| {
+        if me.preemptible {
+            kernel::thread::switch();
+        } else {
+            me.pending_preemption = true;
+        }
+    });
 }

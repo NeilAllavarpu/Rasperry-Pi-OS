@@ -11,7 +11,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
-use libkernel::{add_test, kernel, thread};
+use libkernel::{add_test, architecture::thread::me, kernel, thread};
 
 #[no_mangle]
 fn kernel_main() {
@@ -28,6 +28,7 @@ add_test!(
         for n in 0..NUM_THREADS {
             let counter_ = counter.clone();
             kernel::thread::schedule(thread!(move || {
+                assert!(me(|me| me.preemptible));
                 assert!(counter_.fetch_add(1, Ordering::Relaxed) < NUM_THREADS);
             }));
             while n + 1 - counter.load(Ordering::Relaxed) > MAX_ACTIVE {
@@ -40,6 +41,7 @@ add_test!(
         }
 
         assert!(counter.load(Ordering::Relaxed) == NUM_THREADS);
+        assert!(me(|me| me.preemptible));
     },
-    Duration::from_millis(1300)
+    Duration::from_millis(2000)
 );

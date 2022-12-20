@@ -7,6 +7,7 @@ edition = "2021"
 aarch64-cpu = "*"
 phf = { version = "*", default-features=false, features=["macros"] }
 qemu-exit = "*"
+smallvec = { version = "*", features = ["union", "const_generics", "const_new", "specialization"] }
 tock-registers = "*"
 [lib]
 name = "libkernel"

@@ -1,8 +1,8 @@
 use crate::{
-    architecture::{self, SpinLock},
+    architecture::{self},
     cell::InitCell,
     derive_ord,
-    kernel::{Mutex, PerCore},
+    kernel::PerCore,
 };
 use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
 use alloc::{
@@ -12,10 +12,10 @@ use alloc::{
 };
 use core::{
     cmp::Reverse,
-    mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
+use smallvec::SmallVec;
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 /// Wrapper class for raw ticks
@@ -31,50 +31,60 @@ pub fn now() -> Duration {
     Tick::current_tick().into()
 }
 
+/// Timer scheduling ///
+/// The global queue of all scheduled events
+static SCHEDULED_EVENTS: InitCell<PerCore<BinaryHeap<Reverse<Event>>>> = InitCell::new();
 /// Initializes timer events/callbacks
 pub fn init() {
     tick::init();
     // SAFETY: This is the init seqeunce, and so is safe
     unsafe {
         SCHEDULED_EVENTS.set(PerCore::new(BinaryHeap::new));
+        PREEMPTION_PERIOD.set(
+            Duration::SECOND
+                .try_into()
+                .expect("Preemption period should not overflow"),
+        );
     };
 }
 
-/// Timer scheduling ///
-/// The global queue of all scheduled events
-static SCHEDULED_EVENTS: InitCell<PerCore<BinaryHeap<Reverse<Event>>>> = InitCell::new();
+/// Period between consecutive preemption events
+static PREEMPTION_PERIOD: InitCell<Tick> = InitCell::new();
+
+/// Enables preemption
+pub fn per_core_init() {
+    SCHEDULED_EVENTS.current().push(Reverse(Event {
+        when: *PREEMPTION_PERIOD,
+        operation: Operation::Preemption,
+    }));
+}
 
 /// An operation to be run when an event is scheduled
 enum Operation {
     /// A callback to run once, at a certain point
-    Callback(Box<dyn FnOnce()>),
-    /// A callback that may reoccur indefinitely
-    PeriodicCallback(Arc<SpinLock<dyn FnMut()>>, Tick),
+    Callback(Box<dyn FnOnce()>, Arc<AtomicBool>),
+    /// A callback that indicates preemption
+    Preemption,
 }
 
 /// A key to identify an event
 struct Event {
     /// When this event is scheduled to fire
     when: Tick,
-    /// Whether or not this event is still active
-    active: Arc<AtomicBool>,
     /// The operation to run when scheduled
     operation: Operation,
 }
 
 impl Event {
-    /// Creates a new `EventKey` with a unique ID
-    fn new(when: Tick, operation: Operation) -> Self {
-        Self {
+    /// Creates a new `EventKey` with a unique ID, along with a handle
+    fn new(when: Tick, callback: Box<dyn FnOnce()>) -> (Self, EventHandle) {
+        let active = Arc::new(AtomicBool::new(true));
+        let handle = EventHandle(Arc::downgrade(&active));
+        let event = Self {
             when,
-            active: Arc::new(AtomicBool::new(true)),
-            operation,
-        }
-    }
-
-    /// Creates a handle for this event
-    fn create_handle(&self) -> EventHandle {
-        EventHandle(Arc::downgrade(&self.active))
+            operation: Operation::Callback(callback, active),
+        };
+        (event, handle)
     }
 }
 
@@ -111,42 +121,15 @@ pub fn schedule_callback(
     delay: Duration,
     callback: Box<dyn FnOnce()>,
 ) -> Result<EventHandle, <Tick as TryFrom<Duration>>::Error> {
-    let tick = (now() + delay).try_into()?;
-    Ok(add_event(tick, Operation::Callback(callback)))
-}
-
-/// Schedules a periodic time callback to be run once per period
-#[allow(dead_code)]
-pub fn schedule_periodic_callback(
-    period: Duration,
-    callback: Arc<SpinLock<dyn FnMut()>>,
-) -> Result<EventHandle, <Tick as TryFrom<Duration>>::Error> {
-    let tick = period.try_into()?;
-    Ok(add_event(
-        tick,
-        Operation::PeriodicCallback(
-            callback,
-            period.try_into().expect("Period should not overflow"),
-        ),
-    ))
-}
-
-/// Adds an event to the scheduling list
-fn add_event(when: Tick, operation: Operation) -> EventHandle {
-    let event = Event::new(when, operation);
-    let handle = event.create_handle();
-    {
-        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::SET);
-
-        let _irq_guard = TimerIrqGuard::new();
-        let mut events = SCHEDULED_EVENTS.current();
-        events.push(Reverse(event));
-        if let Some(Reverse(min_event)) = events.peek() {
-            enable_next_timer_irq(min_event.when);
-        }
-        CNTP_CTL_EL0.modify(CNTP_CTL_EL0::IMASK::CLEAR);
+    let when = (now() + delay).try_into()?;
+    let (event, handle) = Event::new(when, callback);
+    let _irq_guard = TimerIrqGuard::new();
+    let mut events = SCHEDULED_EVENTS.current();
+    events.push(Reverse(event));
+    if let Some(Reverse(min_event)) = events.peek() {
+        enable_next_timer_irq(min_event.when);
     }
-    handle
+    Ok(handle)
 }
 
 /// Handles a timer IRQ
@@ -164,35 +147,31 @@ pub fn handle_irq() {
     }
 
     {
-        // Only one core shall handle general timer interrutps
-        // if architecture::machine::core_id() == 0 {
-        /// TODO: Ideally, we would be able to `drain_filter` all matching events
-        /// into a (variably sized) stack-allocated slice/array. However for some
-        /// reason I can't seem to get this to work, so here's a temporary hack to
-        /// make it work. Will panic if there are too many scheduled events to run
-        const MAX_ELEMS: usize = 64;
-
-        let mut to_run: [MaybeUninit<Event>; MAX_ELEMS] = MaybeUninit::uninit_array();
-        let mut num_elems = 0;
+        let mut callbacks: SmallVec<[Box<dyn FnOnce()>; 4]> = SmallVec::new_const();
+        let mut should_preempt: bool = false;
         // Copy any pending events to a local state, so that we don't have to
         // hold the scheduler lock while running events
         {
             let _irq_guard = TimerIrqGuard::new();
             let mut events = SCHEDULED_EVENTS.current();
 
-            while let Some(Reverse(event)) = events.pop() {
-                // Only handle the event if still active; otherwise, drop the event
-                if event.active.load(Ordering::Relaxed) {
-                    if event.when < Tick::current_tick_unsync() {
-                        // Time condition has been met, schedule the event
-                        *to_run
-                            .get_mut(num_elems)
-                            .expect("Index should be in bounds") = MaybeUninit::new(event);
-                        num_elems += 1;
-                    } else {
-                        // Time condition not met, re-add the element and break out
-                        events.push(Reverse(event));
-                        break;
+            while let Some(Reverse(event_)) = events.peek() && event_.when < Tick::current_tick_unsync() {
+                let Reverse(event) = events.pop().expect("Should not fail");
+                match event.operation {
+                    Operation::Callback(callback,  active) => {
+                        // Only handle the event if still active; otherwise, drop the event
+                        if active.load(Ordering::Relaxed) {
+                            // Time condition has been met, prepare run the event
+                            callbacks.push(callback);
+                        }
+                    }
+                    Operation::Preemption => {
+                        // Schedule next preemption event
+                        events.push(Reverse(Event {
+                            when: event.when + *PREEMPTION_PERIOD,
+                            operation: Operation::Preemption,
+                        }));
+                        should_preempt = true;
                     }
                 }
             }
@@ -200,35 +179,19 @@ pub fn handle_irq() {
                 enable_next_timer_irq(next_event_tick);
             }
         }
-        for elem in to_run {
-            if num_elems == 0 {
-                break;
-            }
-            num_elems -= 1;
-            // SAFETY: We manually construct the array so that the first `num_elem`
-            // elements are initialized
-            let event = unsafe { elem.assume_init() };
-            match event.operation {
-                Operation::Callback(callback) => {
-                    callback.call_once(());
-                }
-                Operation::PeriodicCallback(callback, period) => {
-                    let next_event = Event::new(
-                        event.when + period,
-                        Operation::PeriodicCallback(Arc::clone(&callback), period),
-                    );
-                    {
-                        let _irq_guard = TimerIrqGuard::new();
-                        SCHEDULED_EVENTS.current().push(Reverse(next_event));
-                    }
-                    callback.lock().call_mut(());
-                }
-            }
+
+        for callback in callbacks {
+            callback.call_once(());
+        }
+
+        if should_preempt {
+            architecture::thread::preempt();
         }
     }
 
     // SAFETY: `eret` will re-enable exceptions. We need to disable them briefly
-    // so that `ELR_EL1` is not overwritten between now and the final `eret`
+    // so that `ELR_EL1` and `SPSR_EL1` are not overwritten between now and the
+    // final `eret`
     unsafe { architecture::exception::disable() }
     // Restore the exception registers
     ELR_EL1.set(elr.get());

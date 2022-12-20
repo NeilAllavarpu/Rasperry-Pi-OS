@@ -12,6 +12,10 @@ use core::{
     time::Duration,
 };
 
+/// Guards to temporarily disable preemption
+mod preemption_guard;
+pub use preemption_guard::PreemptionGuard;
+
 /// A thread its and associated context
 #[repr(C)]
 pub struct Thread {
@@ -30,6 +34,8 @@ pub struct Thread {
     pub work: Box<dyn FnMut()>,
     /// Whether or not this thread is preemptible
     pub preemptible: bool,
+    /// Whether or not there is a pending preemption for this thread
+    pub pending_preemption: bool,
 }
 
 /// The list of ready threads, sorted by runtime
@@ -100,6 +106,7 @@ impl Thread {
             allocated_sp,
             sp,
             preemptible: true,
+            pending_preemption: false,
         })
     }
 
@@ -219,4 +226,6 @@ pub unsafe fn per_core_init() {
     call_once_per_core!();
     // SAFETY: This is only run once per-core
     unsafe { architecture::thread::set_me(Arc::clone(&*IDLE_THREADS.current())) };
+    // Disable preemption for the idle core
+    architecture::thread::me(|me| me.preemptible = false);
 }
