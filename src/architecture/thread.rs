@@ -1,5 +1,5 @@
 use crate::{
-    architecture,
+    architecture::{self, exception},
     kernel::{self, thread::Thread},
 };
 use aarch64_cpu::registers::TPIDR_EL1;
@@ -32,9 +32,12 @@ pub unsafe fn set_me(thread: Arc<Thread>) {
 /// Jumps directly to the run method for the thread
 #[no_mangle]
 extern "C" fn thread_trampoline() -> ! {
-    me(|me|
+    assert!(!exception::are_disabled());
+    me(|me| {
+        me.last_started = architecture::time::now();
         // SAFETY: This is the only valid time to `run` a newly created thread
-        unsafe { me.run() })
+        unsafe { me.run() }
+    })
 }
 
 /// Creates a stack appropriate to trampoline start a thread
@@ -55,6 +58,8 @@ pub unsafe fn set_up_stack(stack_top: *mut u128) -> *mut u128 {
                 (thread_trampoline as *const fn()).to_bits(),
             )) << 64_u8,
         );
+        // Zero out the DAIF, so that interrupts are enabled when the thread runs
+        desired_top.byte_add(0x10).write(0);
         desired_top
     }
 }
@@ -97,9 +102,14 @@ where
     Callback: FnMut(Arc<Thread>),
 {
     me(|me| {
-        me.runtime += architecture::time::now() - me.last_started;
+        let last_started = me.last_started;
+        let now = architecture::time::now();
+        me.runtime += now - last_started;
         let (data, metadata): (*mut (), <Callback as Pointee>::Metadata) =
             ptr::addr_of_mut!(callback).to_raw_parts();
+        // We should never attempt to context switch while interrupts are disabled
+        // Doing so is likely an error
+        assert!(!architecture::exception::are_disabled());
         // SAFETY: The parameters are correctly set up and passed to context switching
         unsafe {
             #[allow(clippy::as_conversions)]

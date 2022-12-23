@@ -21,8 +21,8 @@ fn kernel_main() {
 add_test!(
     runs_basic_threading,
     {
-        const NUM_THREADS: u64 = 1 << 16;
-        const MAX_ACTIVE: u64 = 60;
+        const NUM_THREADS: u64 = 1 << 14;
+        const MAX_ACTIVE: u64 = 8;
         let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
         for n in 0..NUM_THREADS {
@@ -43,5 +43,5 @@ add_test!(
         assert!(counter.load(Ordering::Relaxed) == NUM_THREADS);
         assert!(me(|me| me.preemptible));
     },
-    Duration::from_millis(2000)
+    Duration::from_millis(20000)
 );

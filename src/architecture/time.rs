@@ -41,7 +41,7 @@ pub fn init() {
     unsafe {
         SCHEDULED_EVENTS.set(PerCore::new(BinaryHeap::new));
         PREEMPTION_PERIOD.set(
-            Duration::SECOND
+            Duration::MILLISECOND
                 .try_into()
                 .expect("Preemption period should not overflow"),
         );
@@ -185,7 +185,7 @@ pub fn handle_irq() {
         }
 
         if should_preempt {
-            architecture::thread::preempt();
+            // architecture::thread::preempt();
         }
     }
 
