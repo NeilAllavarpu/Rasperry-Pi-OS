@@ -54,6 +54,16 @@ impl<T> PerCore<T> {
     }
 }
 
+impl<T: ~const Default> const Default for PerCore<T> {
+    /// Creates a `PerCore` whose initial values are given by the default for
+    /// the type `T`
+    fn default() -> Self {
+        Self {
+            data: [const { RefCell::new(T::default()) }; 4],
+        }
+    }
+}
+
 // SAFETY: Because objects are only accessed one core at a time, and are
 // non-preemptible while doing so, only one thread can access a given element
 // at any time, so mutual exclusion is enforced

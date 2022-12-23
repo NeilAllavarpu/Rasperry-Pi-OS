@@ -1,4 +1,7 @@
-use crate::{add_test, architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
+use crate::{
+    add_test, architecture, call_once_per_core,
+    kernel::{exception::PrivilegeLevel, PerCore},
+};
 use aarch64_cpu::{
     asm::barrier,
     registers::{CurrentEL, CNTP_CTL_EL0, DAIF, SCTLR_EL1, VBAR_EL1},
@@ -43,7 +46,7 @@ pub fn per_core_init() {
 }
 
 /// Checks if exceptions are fully disabled
-fn are_disabled() -> bool {
+pub fn are_disabled() -> bool {
     DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked)
 }
 
@@ -70,31 +73,54 @@ pub unsafe fn disable() {
 
 /// An exception `Guard` masks exceptions while alive,
 /// and restores the prior mask state upon being dropped
-pub struct Guard {
-    /// The mask states
-    daif: u64,
-}
+pub struct Guard;
+
+/// Stores the nesting of interrupt guards. The `u64` indicates the number of
+/// currently active exception guards for that core; because exception guards
+/// prevent preemption, this is also a per-thread storage. The `bool` represents
+/// whether or not interrupts were enabled prior to the creation of the first
+/// exception guard, that may or may not have disabled interrupts
+static NESTED_LEVELS: PerCore<(u64, bool)> = PerCore::default();
 
 impl Guard {
     /// Creates a new exception guard, masking exceptions
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let daif = DAIF.get();
-        if !are_disabled() {
-            // SAFETY: We have just checked that interrupts are enabled,
-            // and we are intending to protect interupts for the duration
-            // of this guard
+        if are_disabled() {
+            let mut nested = NESTED_LEVELS.current();
+            // If this is the first guard, unnested, indicate that exceptions
+            // were already disabled when this guard was created
+            if nested.0 == 0 {
+                nested.1 = false;
+            }
+            // Increment the number of nested guards
+            nested.0 += 1;
+        } else {
+            // SAFETY: We have just checked that interrupts are enabled, and we
+            // are intending to protect interupts for the duration of an
+            // possible guards
             unsafe {
                 disable();
             }
+            // This is the first, unnested guard, and exceptions were enabled
+            // before this guard was created
+            *NESTED_LEVELS.current() = (1, true);
         }
-        Self { daif }
+
+        Self {}
     }
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        DAIF.set(self.daif);
+        let mut nested = NESTED_LEVELS.current();
+        nested.0 -= 1;
+        if nested.0 == 0 && nested.1 {
+            // SAFETY: Interrupts were disabled prior, and are properly being
+            // restored now - no exception guards are held on this thread/core,
+            // and exceptions were disabled by a prior exception guard
+            unsafe { enable() }
+        }
     }
 }
 
