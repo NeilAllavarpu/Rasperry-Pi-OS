@@ -1,6 +1,6 @@
 use crate::{architecture::SpinLock, kernel::Mutex};
 use core::{
-    cell::{Ref, RefCell, RefMut},
+    cell::UnsafeCell,
     mem,
     ops::{Deref, DerefMut},
 };
@@ -29,7 +29,7 @@ use core::{
 /// access to the content of the lock.
 pub struct RwLock<T> {
     /// The protected data
-    data: RefCell<T>,
+    data: UnsafeCell<T>,
     /// How many readers are currently accessing the resource
     num_readers: SpinLock<u64>,
     /// Whether or not the resource is fully available
@@ -40,7 +40,7 @@ impl<T: Send + Sync> RwLock<T> {
     /// Creates a new instance of an `RwLock<T>` which is unlocked.
     pub const fn new(initial: T) -> Self {
         Self {
-            data: RefCell::new(initial),
+            data: UnsafeCell::new(initial),
             num_readers: SpinLock::new(0),
             is_taken: SpinLock::new(()),
         }
@@ -119,6 +119,13 @@ impl<T: Send + Sync> RwLock<T> {
     }
 }
 
+// SAFETY: It is safe to share the contained data across boundaries if the
+// enclosed data can also be safely shared
+unsafe impl<T: Send + Sync> Send for RwLock<T> {}
+// SAFETY: It is safe to share the contained data across boundaries if the
+// enclosed data can also be safely shared
+unsafe impl<T: Send + Sync> Sync for RwLock<T> {}
+
 /// RAII structure used to release the shared read access of a lock when dropped.
 ///
 /// This structure is created by the `read` method on `RwLock`
@@ -126,8 +133,6 @@ impl<T: Send + Sync> RwLock<T> {
 pub struct RwLockReadGuard<'a, T: Send + Sync> {
     /// The enclosing `RwLock`
     rwlock: &'a RwLock<T>,
-    /// The `Ref` to the underlying data
-    reference: Ref<'a, T>,
 }
 
 impl<'a, T: Send + Sync> RwLockReadGuard<'a, T> {
@@ -136,10 +141,7 @@ impl<'a, T: Send + Sync> RwLockReadGuard<'a, T> {
     /// The `RwLock` must be reader-locked before creating this guard.
     /// No `RwLockWriteGuard` should be active while this guard is active
     unsafe fn new(rwlock: &'a RwLock<T>) -> Self {
-        Self {
-            rwlock,
-            reference: rwlock.data.borrow(),
-        }
+        Self { rwlock }
     }
 }
 
@@ -157,7 +159,16 @@ impl<'a, T: Send + Sync> Deref for RwLockReadGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.reference
+        // SAFETY: `get` ensures validity of the pointer, and this guard has
+        // shared access to the data with no other writers, so the shared
+        // reference is safe for the lifetime of this guard
+        unsafe {
+            self.rwlock
+                .data
+                .get()
+                .as_ref()
+                .expect("Should be able to create a shared reference to the `RwLock`'s data")
+        }
     }
 }
 
@@ -169,8 +180,6 @@ impl<'a, T: Send + Sync> Deref for RwLockReadGuard<'a, T> {
 pub struct RwLockWriteGuard<'a, T: Send + Sync> {
     /// The enclosing `RwLock`
     rwlock: &'a RwLock<T>,
-    /// The `Ref` to the underlying data
-    reference: RefMut<'a, T>,
 }
 
 impl<'a, T: Send + Sync> RwLockWriteGuard<'a, T> {
@@ -179,10 +188,7 @@ impl<'a, T: Send + Sync> RwLockWriteGuard<'a, T> {
     /// The `RwLock` must be writer-locked before creating this guard.
     /// No other guards should be active while this guard is active
     unsafe fn new(rwlock: &'a RwLock<T>) -> Self {
-        Self {
-            rwlock,
-            reference: rwlock.data.borrow_mut(),
-        }
+        Self { rwlock }
     }
 }
 
@@ -200,12 +206,28 @@ impl<'a, T: Send + Sync> Deref for RwLockWriteGuard<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.reference
+        // SAFETY: see `RwLockReadGuard`'s `deref`
+        unsafe {
+            self.rwlock
+                .data
+                .get()
+                .as_ref()
+                .expect("Should be able to create a shared reference to the `RwLock`'s data")
+        }
     }
 }
 
 impl<'a, T: Send + Sync> DerefMut for RwLockWriteGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.reference
+        // SAFETY: `get` ensures validity of the pointer, and this guard has
+        // exclusive access to the data, so the mutable reference is safe for
+        // the lifetime of this guard
+        unsafe {
+            self.rwlock
+                .data
+                .get()
+                .as_mut()
+                .expect("Should be able to create a mutable reference to the `RwLock`'s data")
+        }
     }
 }
