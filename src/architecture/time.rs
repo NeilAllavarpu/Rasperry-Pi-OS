@@ -1,21 +1,7 @@
-use crate::{
-    architecture::{self},
-    cell::InitCell,
-    derive_ord,
-    kernel::PerCore,
-};
+use crate::{architecture, cell::InitCell, derive_ord, kernel::PerCore};
 use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
-use alloc::{
-    boxed::Box,
-    collections::BinaryHeap,
-    sync::{Arc, Weak},
-};
-use core::{
-    cmp::Reverse,
-    sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
-};
-use smallvec::SmallVec;
+use alloc::collections::BinaryHeap;
+use core::{cmp::Reverse, time::Duration};
 use tock_registers::interfaces::{ReadWriteable, Readable, Writeable};
 
 /// Wrapper class for raw ticks
@@ -24,7 +10,7 @@ use tick::Tick;
 /// Timer IRQ disabling guard. Enables safe mutual exclusion for a `PerCore`
 /// object here, when the `PerCore` is accessed inside the IRQ handler
 mod timer_irq_lock;
-use timer_irq_lock::TimerIrqGuard;
+pub use timer_irq_lock::TimerIrqGuard;
 
 /// Returns the current time
 pub fn now() -> Duration {
@@ -32,6 +18,7 @@ pub fn now() -> Duration {
 }
 
 /// Timer scheduling ///
+
 /// The global queue of all scheduled events
 static SCHEDULED_EVENTS: InitCell<PerCore<BinaryHeap<Reverse<Event>>>> = InitCell::new();
 /// Initializes timer events/callbacks
@@ -61,8 +48,6 @@ pub fn per_core_init() {
 
 /// An operation to be run when an event is scheduled
 enum Operation {
-    /// A callback to run once, at a certain point
-    Callback(Box<dyn FnOnce()>, Arc<AtomicBool>),
     /// A callback that indicates preemption
     Preemption,
 }
@@ -75,19 +60,6 @@ struct Event {
     operation: Operation,
 }
 
-impl Event {
-    /// Creates a new `EventKey` with a unique ID, along with a handle
-    fn new(when: Tick, callback: Box<dyn FnOnce()>) -> (Self, EventHandle) {
-        let active = Arc::new(AtomicBool::new(true));
-        let handle = EventHandle(Arc::downgrade(&active));
-        let event = Self {
-            when,
-            operation: Operation::Callback(callback, active),
-        };
-        (event, handle)
-    }
-}
-
 derive_ord!(Event);
 
 impl Ord for Event {
@@ -96,40 +68,10 @@ impl Ord for Event {
     }
 }
 
-/// A handle for a scheduled callback. Can be used to cancel the event
-pub struct EventHandle(Weak<AtomicBool>);
-
-impl EventHandle {
-    /// Aborts the scheduled callback
-    #[allow(dead_code)]
-    pub fn abort(self) {
-        if let Some(active) = Weak::upgrade(&self.0) {
-            active.store(false, Ordering::Relaxed);
-        }
-    }
-}
-
 /// Sets the timer to trigger an interrupt at time `when`
 fn enable_next_timer_irq(when: Tick) {
     CNTP_CVAL_EL0.set(when.into());
     CNTP_CTL_EL0.modify(CNTP_CTL_EL0::ENABLE::SET);
-}
-
-/// Schedules a one-time callback to be run after the given delay has passed
-#[allow(dead_code)]
-pub fn schedule_callback(
-    delay: Duration,
-    callback: Box<dyn FnOnce()>,
-) -> Result<EventHandle, <Tick as TryFrom<Duration>>::Error> {
-    let when = (now() + delay).try_into()?;
-    let (event, handle) = Event::new(when, callback);
-    let _irq_guard = TimerIrqGuard::new();
-    let mut events = SCHEDULED_EVENTS.current();
-    events.push(Reverse(event));
-    if let Some(Reverse(min_event)) = events.peek() {
-        enable_next_timer_irq(min_event.when);
-    }
-    Ok(handle)
 }
 
 /// Handles a timer IRQ
@@ -146,25 +88,18 @@ pub fn handle_irq() {
         architecture::exception::enable();
     }
 
-    {
-        let mut callbacks: SmallVec<[Box<dyn FnOnce()>; 4]> = SmallVec::new_const();
-        let mut should_preempt: bool = false;
-        // Copy any pending events to a local state, so that we don't have to
-        // hold the scheduler lock while running events
-        {
-            let _irq_guard = TimerIrqGuard::new();
-            let mut events = SCHEDULED_EVENTS.current();
+    let mut should_preempt = false;
 
-            while let Some(Reverse(event_)) = events.peek() && event_.when < Tick::current_tick_unsync() {
-                let Reverse(event) = events.pop().expect("Should not fail");
+    {
+        /// Error message if the pending events queue is erroneously empty
+        const EMPTY_EVENTS_MESSAGE: &str =
+            "There should always be at least one scheduled event (preemption)";
+        let _irq_guard = TimerIrqGuard::new();
+        let mut events = SCHEDULED_EVENTS.current();
+
+        while let Reverse(event_) = events.peek().expect(EMPTY_EVENTS_MESSAGE) && event_.when < Tick::current_tick_unsync() {
+                let Reverse(event) = events.pop().expect(EMPTY_EVENTS_MESSAGE);
                 match event.operation {
-                    Operation::Callback(callback,  active) => {
-                        // Only handle the event if still active; otherwise, drop the event
-                        if active.load(Ordering::Relaxed) {
-                            // Time condition has been met, prepare run the event
-                            callbacks.push(callback);
-                        }
-                    }
                     Operation::Preemption => {
                         // Schedule next preemption event
                         events.push(Reverse(Event {
@@ -175,18 +110,17 @@ pub fn handle_irq() {
                     }
                 }
             }
-            if let Some(next_event_tick) = events.peek().map(|Reverse(event)| event.when) {
-                enable_next_timer_irq(next_event_tick);
-            }
-        }
 
-        for callback in callbacks {
-            callback.call_once(());
-        }
+        enable_next_timer_irq(
+            events
+                .peek()
+                .map(|Reverse(event)| event.when)
+                .expect(EMPTY_EVENTS_MESSAGE),
+        );
+    }
 
-        if should_preempt {
-            // architecture::thread::preempt();
-        }
+    if should_preempt {
+        architecture::thread::preempt();
     }
 
     // SAFETY: `eret` will re-enable exceptions. We need to disable them briefly

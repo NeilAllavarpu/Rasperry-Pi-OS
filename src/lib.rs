@@ -1,22 +1,29 @@
 #![no_main]
 #![no_std]
+#![feature(const_cmp)]
 #![feature(const_default_impls)]
-#![feature(pointer_is_aligned)]
-#![feature(inline_const)]
+#![feature(const_nonnull_new)]
+#![feature(const_num_from_num)]
+#![feature(const_option)]
+#![feature(const_option_ext)]
 #![feature(const_refs_to_cell)]
+#![feature(const_result_drop)]
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
 #![feature(duration_constants)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
+#![feature(inline_const)]
 #![feature(let_chains)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
+#![feature(pointer_is_aligned)]
 #![feature(ptr_mask)]
 #![feature(ptr_metadata)]
 #![feature(ptr_to_from_bits)]
+#![feature(strict_provenance)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(test_runner)]
 
@@ -39,24 +46,12 @@ pub fn test_runner(tests: &[&TestCase]) -> ! {
     for test in tests {
         for i in 1..=num_loops {
             use crate::architecture::time::now;
-            let timeout = test.timeout;
-
-            // Timeout callback
-            let timeout_handle = architecture::time::schedule_callback(
-                timeout,
-                alloc::boxed::Box::new(move || {
-                    panic!("Test timed out ({:#?})", timeout);
-                }),
-            )
-            .expect("Test should not run extremely long");
 
             println!("[{}/{}] {}:", i, num_loops, test.name);
 
             let start = now();
             (test.test)();
             let end = now();
-
-            timeout_handle.abort();
 
             println!(".... PASSED: {:#?}", end - start);
         }

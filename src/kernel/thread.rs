@@ -5,7 +5,7 @@ use crate::{
     kernel::{Mutex, PerCore},
 };
 use aarch64_cpu::asm::{sev, wfe};
-use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc};
+use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc, vec::Vec};
 use core::{
     alloc::Layout,
     ptr::NonNull,
@@ -79,9 +79,6 @@ fn get_stack() -> (NonNull<u8>, *mut u128) {
 /// Creates a new thread to run the given work
 #[macro_export]
 macro_rules! thread {
-    ($work: ident) => {
-        $crate::kernel::thread::Thread::new_from_function($work)
-    };
     ($work: expr) => {
         $crate::kernel::thread::Thread::new(alloc::boxed::Box::new($work))
     };
@@ -99,6 +96,7 @@ impl Thread {
                 threads.reserve(curr_capacity * 2 - len);
             }
         }
+
         let (allocated_sp, sp) = get_stack();
 
         Arc::new(Self {
@@ -113,11 +111,6 @@ impl Thread {
         })
     }
 
-    /// Creates a new thread, with the given function as its execution path
-    pub fn new_from_function(work: fn()) -> Arc<Self> {
-        Self::new(Box::new(work))
-    }
-
     /// Runs the current thread
     /// # Safety
     /// This should only be called once per thread, to begin its execution
@@ -127,23 +120,31 @@ impl Thread {
     }
 }
 
-/// Frees a thread and its associated stack
-fn free_me(me: Arc<Thread>) {
-    let allocated_sp = me.allocated_sp;
-    ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
-    drop(me);
-    // SAFETY: This is the pointer received from `alloc` and the layout given to `alloc`
-    unsafe { alloc::alloc::dealloc(allocated_sp.as_ptr(), STACK_LAYOUT) }
+impl Drop for Thread {
+    fn drop(&mut self) {
+        ACTIVE_THREAD_COUNT.fetch_sub(1, Ordering::Relaxed);
+        let allocated_sp = self.allocated_sp;
+        // SAFETY: This is the pointer received from `alloc` and the layout given to `alloc`
+        unsafe { alloc::alloc::dealloc(allocated_sp.as_ptr(), STACK_LAYOUT) }
+    }
 }
 
 /// Stops the currently executing thread, and releases its resources
 pub fn stop() -> ! {
-    // static DEAD_THREADS: SpinLock<Vec<Arc<Thread>>> = vec;
+    /// Pending threads to be freed
+    static DEAD_THREADS: SpinLock<Vec<Arc<Thread>>> = SpinLock::new(Vec::new());
+
+    {
+        let mut dead = DEAD_THREADS.lock();
+        dead.clear();
+        dead.reserve(1);
+    }
+
     architecture::thread::context_switch(
         READY_THREADS
             .get()
             .unwrap_or_else(|| Arc::clone(&*IDLE_THREADS.current())),
-        free_me,
+        |me| DEAD_THREADS.lock().push(me),
     );
     unreachable!()
 }

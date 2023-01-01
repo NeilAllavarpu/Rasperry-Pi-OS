@@ -120,7 +120,7 @@ where
                 invoke_callback::<Callback>,
             );
         }
-        assert!(me.preemptible || me.id <= 4);
+        assert!(me.preemptible ^ (me.id <= 4));
         me.last_started = architecture::time::now();
     });
 }
@@ -129,6 +129,7 @@ where
 pub fn preempt() {
     me(|me| {
         if me.preemptible {
+            assert!(me.id > 4);
             kernel::thread::switch();
         } else {
             me.pending_preemption = true;

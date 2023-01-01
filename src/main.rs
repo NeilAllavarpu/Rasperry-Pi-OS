@@ -1,23 +1,30 @@
 //! A Raspberry Pi Operating System
 #![no_main]
 #![no_std]
+#![feature(const_cmp)]
 #![feature(const_default_impls)]
-#![feature(pointer_is_aligned)]
-#![feature(inline_const)]
+#![feature(const_nonnull_new)]
+#![feature(const_num_from_num)]
+#![feature(const_option)]
+#![feature(const_option_ext)]
 #![feature(const_refs_to_cell)]
+#![feature(const_result_drop)]
 #![feature(const_trait_impl)]
 #![feature(custom_test_frameworks)]
 #![feature(default_alloc_error_handler)]
 #![feature(duration_constants)]
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
+#![feature(inline_const)]
 #![feature(let_chains)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
+#![feature(pointer_is_aligned)]
 #![feature(ptr_mask)]
 #![feature(ptr_metadata)]
 #![feature(ptr_to_from_bits)]
+#![feature(strict_provenance)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(_test_runner)]
 #![forbid(unsafe_op_in_unsafe_fn)]
@@ -57,7 +64,7 @@ mod architecture;
 /// Board-specific implementaitons
 mod board;
 /// Additional cells
-pub mod cell;
+mod cell;
 /// Collections
 mod collections;
 /// Generic implementations

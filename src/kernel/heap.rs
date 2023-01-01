@@ -1,228 +1,167 @@
-// use crate::kernel::Mutex;
-use crate::{call_once, collections, log};
+use crate::{architecture::SpinLock, call_once, cell::InitCell, log};
 use core::{
     alloc::{GlobalAlloc, Layout},
-    cmp::{max, min},
+    cmp::max,
+    num::NonZeroUsize,
+    ptr::NonNull,
 };
+use smallvec::SmallVec;
+
+/// Set to store free blocks
+mod internal_set;
+use internal_set::FreeSet;
+/// A pointer to the next node in the free set
+type NextPtr = Option<NonNull<SpinLock<FreeBlock>>>;
+
+/// Internally stored data for each free block
+struct FreeBlock {
+    /// The next free node in the linked list
+    next: NextPtr,
+}
 
 // TODO: Use a paging-based, dynamically sized heap
 /// The static start of the heap
 #[allow(clippy::as_conversions)]
-const HEAP_START: *mut () = 0x20_0000 as *mut ();
+const HEAP_START: NonNull<()> = unsafe { NonNull::new_unchecked(0x20_0000 as *mut ()) };
 /// The static size of the heap
-const HEAP_SIZE: usize = 0x20_0000;
+const HEAP_SIZE: usize = 0x2_0000;
 
-/// A free block in a fixed block heap
-struct FreeBlock {
-    /// Pointer to the next free block
-    next: *mut FreeBlock,
-}
-impl collections::Stackable for FreeBlock {
-    fn read_next(&self) -> *mut Self {
-        self.next
-    }
-
-    unsafe fn set_next(&mut self, next: *mut Self) {
-        self.next = next;
-    }
-}
-
-/// A fixed-block allocator
-#[allow(clippy::module_name_repetitions)]
-pub struct FixedBlockHeap {
-    /// The next free block in the heap
-    first_free: collections::UnsafeStack<FreeBlock>,
-    /// Block size, in bytes
-    block_size: usize,
-    /// The size of the heap
-    size: usize,
-}
-
-impl FixedBlockHeap {
-    /// Creates a new, default heap
-    /// Should not be used until initialized
-    pub const fn new(block_size: usize) -> Self {
-        Self {
-            first_free: collections::UnsafeStack::new(),
-            block_size,
-            size: 0,
-        }
-    }
-
-    /// # Safety
-    /// Implements `GlobalAlloc`'s `alloc`
-    pub unsafe fn alloc(&mut self, layout: Layout) -> Option<*mut u8> {
-        // Unimplemented: larger blocks
-        if layout.size() > self.block_size {
-            return None;
-        }
-        #[allow(clippy::as_conversions)]
-        self.first_free.pop().map(<*mut FreeBlock>::cast)
-    }
-
-    /// # Safety
-    /// Implements `GlobalAlloc`'s `dealloc`
-    pub unsafe fn dealloc(&mut self, ptr: *mut u8, _layout: Layout) {
-        // SAFETY: By assumption, `ptr` was returned from `alloc`, and so
-        // respects proper placement and alignment
-        unsafe {
-            self.first_free.push(ptr.cast());
-        }
-    }
-
-    /// Initializes the heap over the given range of memory
-    /// # Safety
-    /// The range of memory given must be appropriate
-    pub unsafe fn init(&mut self, start: *mut (), size: usize) {
-        assert!(self.block_size.is_power_of_two());
-
-        for block_offset in (0..size).step_by(self.block_size) {
-            // SAFETY: By construction, these pointers are all valid pointers
-            // to unused, fixed heap space
-            unsafe {
-                self.first_free
-                    .push(start.byte_add(block_offset).cast::<FreeBlock>());
-            }
-        }
-
-        self.size = size;
-    }
-
-    /// Logs statistics regarding heap usage
-    /// # Safety
-    /// This function is not thread safe. It is intended to only be used for logging purposes.
-    unsafe fn log(&self) {
-        // SAFETY: This is only used for logging purposes
-        let blocks_free = unsafe { self.first_free.depth() };
-        log!(
-            "HEAP BLOCKS {}B: {} Free blocks, {} In-use blocks",
-            self.block_size,
-            blocks_free,
-            self.size / self.block_size - blocks_free
-        );
-    }
-}
-
-/// Number of blocks to use
-const NUM_BLOCKS: usize = 3;
-/// Size of individual blocks
-#[allow(dead_code)]
-const SIZES: [usize; NUM_BLOCKS] = [64, 256, 1024];
 /// The general purpose heap allocator for the kernel
-struct HeapAllocator {
+struct HeapAllocator<const MIN_BLOCK_SIZE: usize> {
     /// The various heap blocks
-    blocks: [FixedBlockHeap; NUM_BLOCKS],
+    free_sets: InitCell<SmallVec<[FreeSet; 12]>>,
 }
 
-impl HeapAllocator {
+impl<const MIN_BLOCK_SIZE: usize> HeapAllocator<MIN_BLOCK_SIZE> {
     /// Creates a new, uninitialized heap allocator
     const fn new() -> Self {
         Self {
-            blocks: [
-                FixedBlockHeap::new(64),
-                FixedBlockHeap::new(256),
-                FixedBlockHeap::new(1024),
-            ],
+            free_sets: InitCell::new(),
         }
     }
 
     /// Initializes the heap allocator
-    fn init(&mut self) {
+    unsafe fn init(&self, initial_start: NonNull<()>, initial_size: usize) {
         call_once!();
-        let mut remaining_size = HEAP_SIZE;
-        let mut offset = HEAP_START;
-        for heap in self.blocks.iter_mut().rev() {
-            // SAFETY: These ranges are constructed as unused and nonoverlapping
-            unsafe {
-                heap.init(offset, remaining_size * 3 / 4);
-                offset = offset.byte_add(remaining_size * 3 / 4);
-            }
-            remaining_size /= 4;
+        // SAFETY: This is the init sequence
+        unsafe {
+            self.free_sets
+                .set(SmallVec::from(core::array::from_fn(|_| FreeSet::default())));
         }
+        assert_eq!((initial_size >> (self.free_sets.len() - 1)), MIN_BLOCK_SIZE);
+        let set = self
+            .free_sets
+            .get(Self::index_of(
+                Layout::from_size_align(initial_size, initial_size).expect("Should work"),
+            ))
+            .expect("Should be in bounds");
+        // SAFETY: The caller ensures that `initial_start` is suitably large and aligned
+        unsafe { set.insert(initial_start) };
     }
 
-    /// Returns the index of the heap that would allocate the given `Layout`
-    fn get_heap_index(&mut self, layout: Layout) -> Option<usize> {
-        let block_size = max(layout.align(), layout.size());
-        for (n, heap) in self.blocks.iter().enumerate() {
-            if heap.block_size >= block_size {
-                return Some(n);
-            }
-        }
-        None
+    /// Constant function to... add one
+    const fn add_one(n: u32) -> u32 {
+        n + 1
     }
 
-    /// Returns the heap that would allocate the given `Layout`
-    fn get_heap(&mut self, layout: Layout) -> Option<&mut FixedBlockHeap> {
-        self.get_heap_index(layout)
-            .and_then(|i| self.blocks.get_mut(i))
+    /// Computes the set index for a given layout
+    const fn index_of(layout: Layout) -> usize {
+        usize::try_from(
+            ((max(layout.align(), layout.size()) - 1) / MIN_BLOCK_SIZE)
+                .checked_ilog2()
+                .map_or(0, Self::add_one),
+        )
+        .unwrap_or(usize::MAX)
+    }
+
+    /// Computes the block size represented by a given index
+    const fn block_size_of(index: usize) -> NonZeroUsize {
+        NonZeroUsize::new(MIN_BLOCK_SIZE << index).expect("Block size should not be zero")
+    }
+
+    /// Computes the buddy of the given block
+    const fn buddy_of(block: NonZeroUsize, block_size: NonZeroUsize) -> NonNull<()> {
+        #[allow(clippy::as_conversions)]
+        NonNull::new((usize::from(block) ^ usize::from(block_size)) as *mut ())
+            .expect("Buddy should not be null")
     }
 
     /// Logs the heap usage
     /// # Safety
     /// Only to be used for logging. Should not be treated as perfectly accurate or thread safe
     unsafe fn log(&self) {
-        // SAFETY: By assumption, this is non-thread-safe logging
-        unsafe {
-            for heap in &self.blocks {
-                heap.log();
+        for (n, free) in self.free_sets.iter().enumerate() {
+            log!(
+                "BLOCK SIZE 0x{:X}: {} free blocks",
+                Self::block_size_of(n),
+                free.len()
+            );
+        }
+    }
+
+    /// Allocates a block for the block size corresponding to the given set
+    fn alloc_block(&self, index: usize) -> Option<NonNull<()>> {
+        let set = self.free_sets.get(index)?;
+        set.pop().or_else(|| {
+            let block = self.alloc_block(index + 1)?;
+            let block_size = Self::block_size_of(index);
+            let buddy = Self::buddy_of(block.addr(), block_size);
+            // SAFETY: The buddy block is suitably sized and aligned, and not in use
+            assert!(unsafe { set.insert(buddy) });
+            Some(block)
+        })
+    }
+
+    /// Deallocates a block for the block size corresponding to the given set
+    /// SAFETY: `ptr` must have been allocated via `alloc_block` for the same
+    /// `usize`
+    unsafe fn dealloc_block(&self, ptr: NonNull<()>, index: usize) {
+        let set = self.free_sets.get(index).expect("Should be in-bounds");
+        let block_size = Self::block_size_of(index);
+        assert!(ptr.as_ptr().is_aligned_to(block_size.into()));
+
+        // If the "buddy" is already free:
+        if set.remove_buddy_or_insert(ptr, block_size) {
+            // SAFETY: The merged block was acquired via a higher-level
+            // `alloc_block`, so this is safe
+            unsafe {
+                self.dealloc_block(
+                    NonNull::new((usize::from(ptr.addr()) & !usize::from(block_size)) as *mut ())
+                        .expect("Merged block should not be null"),
+                    index + 1,
+                );
             }
         }
     }
 }
 
-#[global_allocator]
 /// The global kernel heap
-static mut KERNEL_HEAP: HeapAllocator = HeapAllocator::new();
+#[global_allocator]
+static KERNEL_HEAP: HeapAllocator<MIN_BLOCK_SIZE> = HeapAllocator::new();
+/// Minimum block size for allocations
+const MIN_BLOCK_SIZE: usize = 64;
 
 // SAFETY: This heap should be correct
-unsafe impl GlobalAlloc for HeapAllocator {
+unsafe impl<const MIN_BLOCK_SIZE: usize> GlobalAlloc for HeapAllocator<MIN_BLOCK_SIZE> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // SAFETY: The kernel heap is designed to be thread safe
-        unsafe { KERNEL_HEAP.get_heap(layout) }
-            // SAFETY: By assumption, the layout should be valid
-            .and_then(|heap| unsafe { heap.alloc(layout) })
-            .unwrap_or(core::ptr::null_mut())
+        loop {
+            if let Some(ptr) = self.alloc_block(Self::index_of(layout)) {
+                return ptr.as_ptr().cast();
+            }
+        }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: The kernel heap is designed to be thread safe
-        if let Some(heap) = unsafe { KERNEL_HEAP.get_heap(layout) } {
-            // SAFETY: By assumption, the layout should be valid
-            unsafe { heap.dealloc(ptr, layout) };
+        // SAFETY: The caller verifies the conditions
+        unsafe {
+            self.dealloc_block(
+                NonNull::new(ptr.cast()).expect("Pointer should not be null"),
+                Self::index_of(layout),
+            );
         }
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        // SAFETY: the caller must ensure that the `new_size` does not overflow.
-        // `layout.align()` comes from a `Layout` and is thus guaranteed to be valid.
-        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
-        // SAFETY: The kernel heap is designed to be thread safe
-        let new_heap = unsafe { KERNEL_HEAP.get_heap_index(new_layout) };
-        // SAFETY: The kernel heap is designed to be thread safe
-        if unsafe { KERNEL_HEAP.get_heap_index(layout) } == new_heap {
-            return if new_heap.is_some() {
-                ptr
-            } else {
-                core::ptr::null_mut()
-            };
-        }
-
-        // Default reallocation behavior from rust source
-
-        // SAFETY: the caller must ensure that `new_layout` is greater than zero.
-        let new_ptr = unsafe { self.alloc(new_layout) };
-        if !new_ptr.is_null() {
-            // SAFETY: the previously allocated block cannot overlap the newly allocated block.
-            // The safety contract for `dealloc` must be upheld by the caller.
-            unsafe {
-                core::ptr::copy_nonoverlapping(ptr, new_ptr, min(layout.size(), new_size));
-                self.dealloc(ptr, layout);
-            }
-        }
-        new_ptr
     }
 }
+
 /// Logs statistics regarding heap usage
 /// # Safety
 /// This function is not thread safe. It is intended to only be used for logging purposes.
@@ -237,5 +176,5 @@ pub unsafe fn log_allocator() {
 pub unsafe fn init() {
     call_once!();
     // SAFETY: This is the correct time to initialize the heap, and only one core runs this
-    unsafe { KERNEL_HEAP.init() }
+    unsafe { KERNEL_HEAP.init(HEAP_START, HEAP_SIZE) }
 }
