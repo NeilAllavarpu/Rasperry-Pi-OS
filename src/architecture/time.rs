@@ -1,4 +1,4 @@
-use crate::{architecture, cell::InitCell, derive_ord, kernel::PerCore};
+use crate::{architecture, cell::InitCell, derive_ord, kernel::PerCore, thread};
 use aarch64_cpu::registers::{CNTP_CTL_EL0, CNTP_CVAL_EL0, ELR_EL1, SPSR_EL1};
 use alloc::collections::BinaryHeap;
 use core::{cmp::Reverse, time::Duration};
@@ -120,7 +120,7 @@ pub fn handle_irq() {
     }
 
     if should_preempt {
-        architecture::thread::preempt();
+        thread::preempt();
     }
 
     // SAFETY: `eret` will re-enable exceptions. We need to disable them briefly

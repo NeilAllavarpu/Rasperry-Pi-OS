@@ -14,8 +14,6 @@ mod per_core;
 pub mod print;
 /// The serial interface
 pub mod serial;
-/// Threading
-pub mod thread;
 
 pub use init::init;
 pub use mutex::Guard as MutexGuard;

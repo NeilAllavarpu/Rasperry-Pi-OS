@@ -32,7 +32,7 @@ macro_rules! log {
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $string),
-            $crate::architecture::thread::me(|me| me.id),
+            $crate::thread::current().id().as_u64(),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
         ));
@@ -43,7 +43,7 @@ macro_rules! log {
 
         $crate::kernel::print::_print(format_args_nl!(
             concat!("[T {}, {}.{:03}s] ", $format_string),
-            $crate::architecture::thread::me(|me| me.id),
+            $crate::thread::current().id().as_u64(),
             timestamp.as_secs(),
             timestamp.subsec_millis(),
             $($arg)*

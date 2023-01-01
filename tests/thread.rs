@@ -7,41 +7,32 @@
 
 extern crate alloc;
 use alloc::sync::Arc;
-use core::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
-use libkernel::{add_test, architecture::thread::me, kernel, thread};
+use core::sync::atomic::{AtomicU64, Ordering};
+use libkernel::{add_test, thread};
 
 #[no_mangle]
 fn kernel_main() {
     test_main()
 }
 
-add_test!(
-    runs_basic_threading,
-    {
-        const NUM_THREADS: u64 = 1 << 14;
-        const MAX_ACTIVE: u64 = 1 << 8;
-        let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+add_test!(runs_basic_threading, {
+    const NUM_THREADS: u64 = 1 << 16;
+    const MAX_ACTIVE: u64 = 1 << 8;
+    let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
-        for n in 0..NUM_THREADS {
-            let counter_ = counter.clone();
-            kernel::thread::schedule(thread!(move || {
-                assert!(me(|me| me.preemptible));
-                assert!(counter_.fetch_add(1, Ordering::Relaxed) < NUM_THREADS);
-            }));
-            while n + 1 - counter.load(Ordering::Relaxed) > MAX_ACTIVE {
-                kernel::thread::switch()
-            }
+    for n in 0..NUM_THREADS {
+        let counter_ = counter.clone();
+        thread::schedule(thread::spawn(move || {
+            assert!(counter_.fetch_add(1, Ordering::Relaxed) < NUM_THREADS);
+        }));
+        while n + 1 - counter.load(Ordering::Relaxed) > MAX_ACTIVE {
+            thread::yield_now()
         }
+    }
 
-        while counter.load(Ordering::Relaxed) < NUM_THREADS {
-            kernel::thread::switch();
-        }
+    while counter.load(Ordering::Relaxed) < NUM_THREADS {
+        thread::yield_now();
+    }
 
-        assert!(counter.load(Ordering::Relaxed) == NUM_THREADS);
-        assert!(me(|me| me.preemptible));
-    },
-    Duration::from_millis(2500)
-);
+    assert!(counter.load(Ordering::Relaxed) == NUM_THREADS);
+});

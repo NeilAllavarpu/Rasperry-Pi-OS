@@ -1,11 +1,9 @@
-use crate::architecture;
+use crate::{architecture, thread::PreemptionGuard};
 use core::{
     cell::{RefCell, RefMut},
     marker::Destruct,
     ops::{Deref, DerefMut},
 };
-
-use super::thread::PreemptionGuard;
 
 /// The maximum possible number of cores supported
 const MAX_CORES: usize = 4;
@@ -32,6 +30,16 @@ impl<T> PerCore<T> {
                 .expect("Core ID should be in-bounds")
                 .borrow_mut(),
         )
+    }
+
+    /// Retruns a `RefCell` to the current core's entry
+    /// # Safety
+    /// The caller must ensure that execution is not switched to another core
+    /// (e.g. via preemption or blocking)
+    pub unsafe fn current_unprotected(&self) -> &RefCell<T> {
+        self.data
+            .get(usize::from(architecture::machine::core_id()))
+            .expect("Core ID should be in-bounds")
     }
 }
 

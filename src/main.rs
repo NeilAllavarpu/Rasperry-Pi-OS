@@ -51,6 +51,7 @@
 #![allow(clippy::self_named_module_files)]
 #![allow(clippy::default_numeric_fallback)]
 #![allow(clippy::new_without_default)]
+#![allow(clippy::module_name_repetitions)]
 
 use aarch64_cpu::asm::wfi;
 
@@ -73,6 +74,8 @@ mod kernel;
 mod macros;
 /// Synchronization primitives
 mod sync;
+/// Native threads
+mod thread;
 
 #[no_mangle]
 /// The default main sequence

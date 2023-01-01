@@ -1,7 +1,4 @@
-use crate::{
-    architecture::{self, thread::me},
-    board, call_once, call_once_per_core, kernel, log, thread,
-};
+use crate::{architecture, board, call_once, kernel, log, thread};
 
 extern "Rust" {
     /// The `kernel_init()` for unit tests.
@@ -20,6 +17,8 @@ pub extern "C" fn init() -> ! {
             // Create the heap
             kernel::heap::init();
 
+            thread::init();
+
             // Initialize architecture-specific items
             architecture::init();
 
@@ -27,9 +26,8 @@ pub extern "C" fn init() -> ! {
             board::init();
 
             log!("What just happened? Why am I here?");
-            kernel::thread::init();
 
-            kernel::thread::schedule(thread!(||
+            thread::schedule(thread::spawn(||
                 // SAFETY: `kernel_main` is appropriately defined by the build system
                    kernel_main()));
 
@@ -44,7 +42,6 @@ pub extern "C" fn init() -> ! {
 /// # Safety
 /// Must only be called once per core
 unsafe fn per_core_init() -> ! {
-    call_once_per_core!();
     // Make sure this is running in EL1
     assert_eq!(
         architecture::exception::el(),
@@ -54,7 +51,7 @@ unsafe fn per_core_init() -> ! {
 
     // SAFETY: Only runs once per core
     unsafe {
-        kernel::thread::per_core_init();
+        thread::per_core_init();
         architecture::per_core_init();
     }
 
@@ -64,7 +61,5 @@ unsafe fn per_core_init() -> ! {
         architecture::exception::enable();
     }
 
-    // SAFETY: It is safe to run the idle threads because the idle threads
-    // have not been run yet, and will not be run any other way
-    unsafe { me(|me| me.run()) }
+    thread::idle_loop();
 }

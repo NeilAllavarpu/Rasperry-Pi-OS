@@ -35,6 +35,7 @@ pub mod collections;
 pub mod kernel;
 pub mod macros;
 pub mod sync;
+pub mod thread;
 
 /// The default runner for unit tests.
 pub fn test_runner(tests: &[&TestCase]) -> ! {

@@ -1,4 +1,4 @@
-use crate::{architecture, call_once_per_core, kernel, kernel::exception::PrivilegeLevel};
+use crate::{architecture, kernel, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::eret,
     registers::{CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, HCR_EL2, SP, SPSR_EL2, SP_EL1},
@@ -13,7 +13,6 @@ core::arch::global_asm!(include_str!("boot.s"));
 /// Jumps to the main init sequence\
 #[no_mangle]
 extern "C" fn el2_init() -> ! {
-    call_once_per_core!();
     // Make sure this is running in EL2
     assert_eq!(
         architecture::exception::el(),

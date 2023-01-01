@@ -10,8 +10,6 @@ pub mod machine;
 mod shutdown;
 /// Spinlocks for mutual exclusion
 mod spinlock;
-/// Architecture threading support: context switching and identifying the current thread
-pub mod thread;
 /// Timer support
 pub mod time;
 

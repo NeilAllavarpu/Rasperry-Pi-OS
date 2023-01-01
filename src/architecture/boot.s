@@ -15,10 +15,6 @@ _start:
 	cmp x0, x1
 	b.ne 1b
 
-    # For logging purposes, make it appear as if the thread ID is 0
-    mov x0, #0
-    str xzr, [x0]
-
     # Run init sequence
     mov sp, 0x80000
     b el2_init

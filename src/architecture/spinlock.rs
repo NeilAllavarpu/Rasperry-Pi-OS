@@ -39,11 +39,11 @@ impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
     type State = T;
 
     fn lock(&self) -> kernel::MutexGuard<Self> {
-        let mut guard = architecture::exception::Guard::new();
+        // let mut guard = architecture::exception::Guard::new();
         while self.is_locked.swap(true, Ordering::Acquire) {
-            drop(guard);
+            // drop(guard);
             wfe();
-            guard = architecture::exception::Guard::new();
+            // guard = architecture::exception::Guard::new();
         }
 
         // SAFETY:
@@ -55,14 +55,14 @@ impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
         // should never be dropped, or this stores a stale previous guard, which
         // has already been dropped by `unlock`
         unsafe {
-            self.guard.borrow_mut().write(guard);
+            // self.guard.borrow_mut().write(guard);
             kernel::MutexGuard::new(self, &mut *self.inner.get())
         }
     }
 
     unsafe fn unlock(&self) {
         // SAFETY: `guard` was set by `lock` and so must be valid
-        let _guard = unsafe { self.guard.borrow_mut().assume_init_read() };
+        // let _guard = unsafe { self.guard.borrow_mut().assume_init_read() };
         assert!(self.is_locked.swap(false, Ordering::Release));
         sev();
     }

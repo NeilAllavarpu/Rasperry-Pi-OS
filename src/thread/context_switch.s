@@ -9,23 +9,19 @@ _context_switch:
 	stp	x23, x24, [sp, #0x40]
 	stp	x21, x22, [sp, #0x30]
 	stp	x19, x20, [sp, #0x20]
-
-    mrs x4, daif
-    stp x18, x4, [sp, #0x10]
+    str x18,      [sp, #0x10]
 
     # Save old SP
     mrs x4, TPIDR_EL1
     mov x5, sp
-    str x5, [x4, #8]
+    str x5, [x4]
     # Load new SP
     msr TPIDR_EL1, x2
-    ldr x5, [x2, #8]
-    mov sp, x5
+    ldr x6, [x2]
+    mov sp, x6
 
     # Restore context
-    ldp x18, x19, [sp, #0x10]
-    msr daif, x19
-
+    ldr x18,      [sp, #0x10]
 	ldp	x19, x20, [sp, #0x20]
 	ldp	x21, x22, [sp, #0x30]
 	ldp	x23, x24, [sp, #0x40]
