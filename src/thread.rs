@@ -1,10 +1,10 @@
 use crate::{
-    architecture::SpinLock,
     call_once,
     cell::InitCell,
     derive_ord,
-    kernel::{Mutex, PerCore},
+    kernel::PerCore,
     sync::RwLock,
+    sync::{Mutex, SpinLock},
 };
 use aarch64_cpu::asm::{sev, wfe};
 use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc, vec::Vec};

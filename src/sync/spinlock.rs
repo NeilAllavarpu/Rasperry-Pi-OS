@@ -1,13 +1,12 @@
-use crate::{
-    architecture::{self, exception},
-    kernel,
-};
+use crate::architecture::exception;
 use aarch64_cpu::asm::{sev, wfe};
 use core::{
     cell::{RefCell, UnsafeCell},
     mem::MaybeUninit,
     sync::atomic::{AtomicBool, Ordering},
 };
+
+use super::{Mutex, MutexGuard};
 
 /// A spinlock mutex
 pub struct SpinLock<T: ?Sized> {
@@ -35,10 +34,10 @@ unsafe impl<T> Send for SpinLock<T> {}
 // SAFETY: The spinlock guarantees thread safety
 unsafe impl<T> Sync for SpinLock<T> {}
 
-impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
+impl<T: ?Sized> Mutex for SpinLock<T> {
     type State = T;
 
-    fn lock(&self) -> kernel::MutexGuard<Self> {
+    fn lock(&self) -> MutexGuard<Self> {
         // let mut guard = architecture::exception::Guard::new();
         while self.is_locked.swap(true, Ordering::Acquire) {
             // drop(guard);
@@ -56,7 +55,7 @@ impl<T: ?Sized> kernel::Mutex for SpinLock<T> {
         // has already been dropped by `unlock`
         unsafe {
             // self.guard.borrow_mut().write(guard);
-            kernel::MutexGuard::new(self, &mut *self.inner.get())
+            MutexGuard::new(self, &mut *self.inner.get())
         }
     }
 

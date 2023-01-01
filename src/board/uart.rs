@@ -1,5 +1,9 @@
 /// Documentation for the UART: <https://datasheets.raspberrypi.com/bcm2711/bcm2711-peripherals.pdf>
-use crate::{architecture::SpinLock, board::Mmio, call_once, kernel, kernel::Mutex, log};
+use crate::{
+    board::Mmio,
+    call_once, kernel, log,
+    sync::{Mutex, SpinLock},
+};
 use core::fmt::{self, Write};
 use tock_registers::{
     interfaces::{Readable, Writeable},

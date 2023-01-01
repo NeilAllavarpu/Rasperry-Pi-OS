@@ -1,4 +1,4 @@
-use crate::{architecture::SpinLock, kernel::Mutex};
+use crate::sync::{Mutex, SpinLock};
 use core::{
     cell::UnsafeCell,
     mem,

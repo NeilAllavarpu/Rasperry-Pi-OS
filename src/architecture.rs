@@ -8,13 +8,10 @@ mod exception_handlers;
 pub mod machine;
 /// System shutdown functionality
 mod shutdown;
-/// Spinlocks for mutual exclusion
-mod spinlock;
 /// Timer support
 pub mod time;
 
 pub use shutdown::shutdown;
-pub use spinlock::SpinLock;
 
 /// Architecture-wide initialization
 /// # Safety

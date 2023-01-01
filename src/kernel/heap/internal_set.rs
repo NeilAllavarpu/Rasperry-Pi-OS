@@ -1,9 +1,6 @@
 use crate::{
-    architecture::SpinLock,
-    kernel::{
-        heap::{FreeBlock, MIN_BLOCK_SIZE},
-        Mutex,
-    },
+    kernel::heap::{FreeBlock, MIN_BLOCK_SIZE},
+    sync::{Mutex, SpinLock},
 };
 use core::{
     mem,

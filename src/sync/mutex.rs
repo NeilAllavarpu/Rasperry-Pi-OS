@@ -7,7 +7,7 @@ pub trait Mutex {
 
     /// Locks the mutex, preventing any other thread from accessing the protected state
     /// Returns a temporary guard to the protected state
-    fn lock(&self) -> Guard<Self>;
+    fn lock(&self) -> MutexGuard<Self>;
 
     /// Unlocks the mutex, allowing other threads to acquire the lock
     /// # Safety
@@ -16,14 +16,14 @@ pub trait Mutex {
 }
 
 /// Provides protected access to the data of a `Mutex`. Dereferencing the `Guard` will provide access to the data, and the `Mutex` remains locked while the `Guard` persists. When the `Guard` is dropped, the `Mutex` is unlocked.
-pub struct Guard<'a, Lock: Mutex + ?Sized> {
+pub struct MutexGuard<'a, Lock: Mutex + ?Sized> {
     /// The enclosing mutex
     mutex: &'a Lock,
     /// The mutex's state
     data: &'a mut Lock::State,
 }
 
-impl<'a, Lock: Mutex + ?Sized> Guard<'a, Lock> {
+impl<'a, Lock: Mutex + ?Sized> MutexGuard<'a, Lock> {
     /// Creates a new `Guard` for the given mutex
     /// # Safety
     /// The mutex must be locked before creating this guard
@@ -33,7 +33,7 @@ impl<'a, Lock: Mutex + ?Sized> Guard<'a, Lock> {
     }
 }
 
-impl<'a, Lock: Mutex + ?Sized> Drop for Guard<'a, Lock> {
+impl<'a, Lock: Mutex + ?Sized> Drop for MutexGuard<'a, Lock> {
     fn drop(&mut self) {
         // SAFETY: By assumption, this guard has the lock on the mutex, and so can release it
         unsafe {
@@ -42,7 +42,7 @@ impl<'a, Lock: Mutex + ?Sized> Drop for Guard<'a, Lock> {
     }
 }
 
-impl<'a, Lock: Mutex + ?Sized> Deref for Guard<'a, Lock> {
+impl<'a, Lock: Mutex + ?Sized> Deref for MutexGuard<'a, Lock> {
     type Target = Lock::State;
 
     fn deref(&self) -> &Self::Target {
@@ -50,7 +50,7 @@ impl<'a, Lock: Mutex + ?Sized> Deref for Guard<'a, Lock> {
     }
 }
 
-impl<'a, Lock: Mutex + ?Sized> DerefMut for Guard<'a, Lock> {
+impl<'a, Lock: Mutex + ?Sized> DerefMut for MutexGuard<'a, Lock> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data
     }

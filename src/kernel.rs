@@ -4,8 +4,6 @@ pub mod exception;
 pub mod heap;
 /// Main initialization sequences
 mod init;
-/// The mutex trait and guard
-mod mutex;
 /// Panic handling
 mod panic;
 /// Per-core items
@@ -16,7 +14,5 @@ pub mod print;
 pub mod serial;
 
 pub use init::init;
-pub use mutex::Guard as MutexGuard;
-pub use mutex::Mutex;
 pub use per_core::PerCore;
 pub use serial::Serial;

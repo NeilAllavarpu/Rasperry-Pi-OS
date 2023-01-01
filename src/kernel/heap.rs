@@ -1,4 +1,4 @@
-use crate::{architecture::SpinLock, call_once, cell::InitCell, log};
+use crate::{call_once, cell::InitCell, log, sync::SpinLock};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cmp::max,
