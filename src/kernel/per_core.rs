@@ -1,7 +1,7 @@
 use crate::architecture;
 use core::{
     cell::{RefCell, RefMut},
-    mem,
+    marker::Destruct,
     ops::{Deref, DerefMut},
 };
 
@@ -38,19 +38,16 @@ impl<T> PerCore<T> {
 impl<T> PerCore<T> {
     /// Creates a default-initialized `PerCore` struct that is initializable at
     /// compile time, by using the result of the closure as the default value
-    pub const fn new<G: ~const Fn() -> T>(initial: G) -> Self {
+    pub const fn new<Generator: ~const Fn() -> T + ~const Destruct>(initial: Generator) -> Self {
         // TODO: Is there a better way to initialize this without copy-paste?
-        let per_core = Self {
+        Self {
             data: [
                 RefCell::new(initial.call(())),
                 RefCell::new(initial.call(())),
                 RefCell::new(initial.call(())),
                 RefCell::new(initial.call(())),
             ],
-        };
-        // `forget` is necessary because this is a const context
-        mem::forget(initial);
-        per_core
+        }
     }
 }
 
