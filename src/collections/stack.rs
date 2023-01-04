@@ -56,23 +56,6 @@ impl<T: Stackable> UnsafeStack<T> {
             .ok()
             .map(|(top, _)| top)
     }
-
-    /// Computes the current depth of the the stack, for logging purposes
-    /// Not thread safe, or perfectly accurate
-    ///
-    /// # Safety
-    /// Use *only* for logging purposes
-    pub unsafe fn depth(&self) -> usize {
-        let mut ptr = self.top.load_unstamped(Ordering::Acquire);
-        let mut depth: usize = 0;
-        // SAFETY: `ptr` is obtained from the existing stack list,
-        // and must be valid via `push`
-        while let Some(element) = unsafe { ptr.as_ref() } {
-            depth += 1;
-            ptr = element.read_next();
-        }
-        depth
-    }
 }
 
 /// SAFETY: By construction, these stacks are thread-safe

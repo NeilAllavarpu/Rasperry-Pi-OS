@@ -1,3 +1,3 @@
 /// Lock-free stacks
 mod stack;
-pub use stack::{ArcStack, Stackable, UnsafeStack};
+pub use stack::{ArcStack, Stackable};

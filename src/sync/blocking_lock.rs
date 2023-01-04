@@ -1,17 +1,13 @@
+use super::{Mutex, MutexGuard};
+use crate::{
+    collections::ArcStack,
+    thread::{block, schedule, Tcb, Thread},
+};
+use aarch64_cpu::asm::barrier::{self, isb};
 use core::{
     cell::UnsafeCell,
     sync::atomic::{AtomicI64, Ordering},
 };
-
-use aarch64_cpu::asm::barrier::{self, isb};
-use alloc::sync::Arc;
-
-use crate::{
-    collections::UnsafeStack,
-    thread::{block, schedule, Tcb, Thread},
-};
-
-use super::{Mutex, MutexGuard};
 
 /// A blocking mutex.
 pub struct BlockingLock<T> {
@@ -20,7 +16,7 @@ pub struct BlockingLock<T> {
     /// * Nonpositive indicates the number of threads waiting for a taken lock
     waiting_count: AtomicI64,
     /// Threads currently blocked on the lock
-    blocked_threads: UnsafeStack<Tcb>,
+    blocked_threads: ArcStack<Tcb>,
     /// The protected state
     state: UnsafeCell<T>,
 }
@@ -30,7 +26,7 @@ impl<T> BlockingLock<T> {
     pub const fn new(initial: T) -> Self {
         Self {
             waiting_count: AtomicI64::new(1),
-            blocked_threads: UnsafeStack::new(),
+            blocked_threads: ArcStack::new(),
             state: UnsafeCell::new(initial),
         }
     }
@@ -49,9 +45,7 @@ impl<T> Mutex for BlockingLock<T> {
         if self.waiting_count.fetch_sub(1, Ordering::Acquire) != 1 {
             // SAFETY: Threads are fixed in place on the heap, and persist since
             // the strong count is at least one
-            block(|thread| unsafe {
-                self.blocked_threads.push(Arc::into_raw(thread).cast_mut());
-            });
+            block(|thread| self.blocked_threads.push(thread));
 
             assert!(self.waiting_count.load(Ordering::Acquire) <= 0);
         }
@@ -65,7 +59,7 @@ impl<T> Mutex for BlockingLock<T> {
             loop {
                 if let Some(thread) = self.blocked_threads.pop() {
                     // SAFETY: This thread was taken from an `Arc`
-                    schedule(Thread(unsafe { Arc::from_raw(thread) }));
+                    schedule(Thread(thread));
                     break;
                 }
                 isb(barrier::SY);
