@@ -1,4 +1,4 @@
-use crate::{call_once, cell::InitCell, log, sync::SpinLock};
+use crate::{call_once, cell::InitCell, log, sync::BlockingLock};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cmp::max,
@@ -11,7 +11,7 @@ use smallvec::SmallVec;
 mod internal_set;
 use internal_set::FreeSet;
 /// A pointer to the next node in the free set
-type NextPtr = Option<NonNull<SpinLock<FreeBlock>>>;
+type NextPtr = Option<NonNull<BlockingLock<FreeBlock>>>;
 
 /// Internally stored data for each free block
 struct FreeBlock {
@@ -144,11 +144,8 @@ const MIN_BLOCK_SIZE: usize = 64;
 // SAFETY: This heap should be correct
 unsafe impl<const MIN_BLOCK_SIZE: usize> GlobalAlloc for HeapAllocator<MIN_BLOCK_SIZE> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        loop {
-            if let Some(ptr) = self.alloc_block(Self::index_of(layout)) {
-                return ptr.as_ptr().cast();
-            }
-        }
+        self.alloc_block(Self::index_of(layout))
+            .map_or(core::ptr::null_mut(), |ptr| ptr.as_ptr().cast())
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {

@@ -26,25 +26,24 @@ pub fn init() {
     tick::init();
     // SAFETY: This is the init seqeunce, and so is safe
     unsafe {
-        SCHEDULED_EVENTS.set(PerCore::new(BinaryHeap::new));
         PREEMPTION_PERIOD.set(
             Duration::MILLISECOND
                 .try_into()
                 .expect("Preemption period should not overflow"),
         );
+        SCHEDULED_EVENTS.set(PerCore::new(|| {
+            let mut events = BinaryHeap::new();
+            events.push(Reverse(Event {
+                when: *PREEMPTION_PERIOD,
+                operation: Operation::Preemption,
+            }));
+            events
+        }));
     };
 }
 
 /// Period between consecutive preemption events
 static PREEMPTION_PERIOD: InitCell<Tick> = InitCell::new();
-
-/// Enables preemption
-pub fn per_core_init() {
-    SCHEDULED_EVENTS.current().push(Reverse(Event {
-        when: *PREEMPTION_PERIOD,
-        operation: Operation::Preemption,
-    }));
-}
 
 /// An operation to be run when an event is scheduled
 enum Operation {

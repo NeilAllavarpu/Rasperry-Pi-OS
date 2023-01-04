@@ -1,20 +1,21 @@
 use crate::{
     call_once,
     cell::InitCell,
+    collections::{ArcStack, Stackable},
     derive_ord,
     kernel::PerCore,
     sync::RwLock,
     sync::{Mutex, SpinLock},
 };
 use aarch64_cpu::asm::{sev, wfe};
-use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BinaryHeap, sync::Arc};
 use core::{
     alloc::Layout,
     cell::{Cell, RefCell},
     cmp::Reverse,
     num::NonZeroU64,
     ptr::NonNull,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     time::Duration,
 };
 
@@ -43,18 +44,30 @@ struct TcbLocal {
 
 /// A thread its and associated context
 #[repr(C)]
-struct Tcb {
+pub struct Tcb {
     /// The last-saved stack pointer of the thread
     /// Should not be used, except for when context switching or upon creation
     sp: NonNull<u128>,
     /// The thread's numerical ID, for logging purposes
     id: NonZeroU64,
+    /// Next pointer
+    next: *mut Self,
     /// The SP from allocation
     allocated_sp: NonNull<u8>,
     /// The total CPU runtime of this thread
     runtime: RwLock<Duration>,
     /// Private internal data
     local: TcbLocal,
+}
+
+impl Stackable for Tcb {
+    unsafe fn set_next(&mut self, next: *mut Self) {
+        self.next = next;
+    }
+
+    fn read_next(&self) -> *mut Self {
+        self.next
+    }
 }
 
 /// The ID of the next thread created
@@ -111,6 +124,7 @@ pub fn spawn(f: impl FnMut() + 'static) -> Thread {
         runtime: RwLock::new(Duration::ZERO),
         allocated_sp,
         sp,
+        next: core::ptr::null_mut(),
         local: TcbLocal {
             preemptible: Cell::new(true),
             last_started: Cell::new(Duration::default()),
@@ -147,18 +161,13 @@ impl Drop for Tcb {
 /// Stops the currently executing thread, and releases its resources
 pub fn stop() -> ! {
     /// Pending threads to be freed
-    static DEAD_THREADS: PerCore<Vec<Arc<Tcb>>> = PerCore::new(Vec::new);
+    static DEAD_THREADS: ArcStack<Tcb> = ArcStack::new();
 
-    {
-        let mut dead = DEAD_THREADS.current();
-        dead.clear();
-        dead.reserve(1);
+    while let Some(dead_thread) = DEAD_THREADS.pop() {
+        drop(dead_thread);
     }
 
-    architecture::context_switch(
-        get_thread_to_run().unwrap_or_else(|| Arc::clone(&IDLE_THREADS.current().0)),
-        |me| DEAD_THREADS.current().push(me),
-    );
+    force_context_switch(|me| DEAD_THREADS.push(me));
     unreachable!()
 }
 
@@ -167,8 +176,25 @@ fn get_thread_to_run() -> Option<Arc<Tcb>> {
     READY_THREADS.lock().pop().map(|Reverse(Thread(tcb))| tcb)
 }
 
+/// Context switches into the next ready thread, or the idle thread if none are
+/// available
+fn force_context_switch(callback: impl FnMut(Arc<Tcb>)) {
+    if let Some(thread) = get_thread_to_run() {
+        architecture::context_switch(thread, callback);
+    } else {
+        let _guard = PreemptionGuard::new();
+        architecture::context_switch(
+            {
+                let idle_stored = IDLE_THREADS.current();
+                Arc::clone(&idle_stored.0)
+            },
+            callback,
+        );
+    }
+}
+
 /// A handle for a thread
-pub struct Thread(Arc<Tcb>);
+pub struct Thread(pub Arc<Tcb>);
 
 impl Thread {
     /// Gets the thread’s unique identifier.
@@ -216,9 +242,16 @@ pub fn schedule(thread: Thread) {
 /// Cooperatively yields to another thread, if another thread is waiting to run
 #[allow(dead_code)]
 pub fn yield_now() {
+    assert!(!current().0.is_idle(), "The idle thread should never yield");
     if let Some(thread) = get_thread_to_run() {
         architecture::context_switch(thread, |current| schedule(Thread(current)));
     }
+}
+
+/// Blocks the calling thread, and executes the given callback after switching threads
+pub fn block(callback: impl FnMut(Arc<Tcb>)) {
+    assert!(!current().0.is_idle(), "The idle thread should never block");
+    force_context_switch(callback);
 }
 
 /// Primary initialization sequence for threading
@@ -254,13 +287,18 @@ pub unsafe fn init() {
 /// # Safety
 /// Must only be called once on each core, at the appropriate time
 pub unsafe fn per_core_init() {
-    // call_once_per_core!();
+    /// Enforces mutual exclusion on the heap accesses so that no blocking occurs
+    static BUSY: AtomicBool = AtomicBool::new(false);
+    while BUSY.swap(true, Ordering::Acquire) {
+        wfe();
+    }
+    // SAFETY: No preemption or blocking occurs here
+    let cloned_arc = Arc::clone(unsafe { &IDLE_THREADS.current_unprotected().borrow().0 });
+    BUSY.store(false, Ordering::Release);
+    sev();
+
     // SAFETY: This is only run once per-core
     unsafe {
-        architecture::set_me(Thread(Arc::clone(
-            &IDLE_THREADS.current_unprotected().borrow().0,
-        )));
-    };
-    // Disable preemption for the idle core
-    // architecture::me(|me| me.preemptible = false);
+        architecture::set_me(Thread(cloned_arc));
+    }
 }

@@ -1,4 +1,5 @@
 use crate::sync::AtomicStampedPtr;
+use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
 
 /// Trait for items that can be put into `Stack`s or `BoxStack`s
@@ -78,3 +79,27 @@ impl<T: Stackable> UnsafeStack<T> {
 unsafe impl<T: Stackable> Send for UnsafeStack<T> {}
 /// SAFETY: By construction, these stacks are thread-safe
 unsafe impl<T: Stackable> Sync for UnsafeStack<T> {}
+
+/// A lock-free intrusive stack of `Arc`s
+pub struct ArcStack<T: Stackable>(UnsafeStack<T>);
+
+impl<T: Stackable> ArcStack<T> {
+    pub const fn new() -> Self {
+        Self(UnsafeStack::new())
+    }
+
+    /// Adds an `Arc` to the top of the stack
+    pub fn push(&self, value: Arc<T>) {
+        // SAFETY: `Arc`s are pinned into memory, and since this holds a strong
+        // pointer the underlying allocation is not freed
+        unsafe {
+            self.0.push(Arc::into_raw(value).cast_mut());
+        }
+    }
+
+    // Removes the first `Arc` from the top of the stack
+    pub fn pop(&self) -> Option<Arc<T>> {
+        // SAFETY: The `pop`ped pointer came from an `Arc::into_raw` via `push`
+        self.0.pop().map(|arc| unsafe { Arc::from_raw(arc) })
+    }
+}

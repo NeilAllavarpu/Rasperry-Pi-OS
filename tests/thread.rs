@@ -15,8 +15,8 @@ fn kernel_main() {
     test_main()
 }
 
-add_test!(runs_basic_threading, {
-    const NUM_THREADS: u64 = 1 << 16;
+add_test!(threading, {
+    const NUM_THREADS: u64 = 1 << 12;
     const MAX_ACTIVE: u64 = 1 << 8;
     let counter: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 

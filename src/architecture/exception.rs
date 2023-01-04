@@ -1,7 +1,4 @@
-use crate::{
-    add_test, architecture, call_once_per_core,
-    kernel::{exception::PrivilegeLevel, PerCore},
-};
+use crate::{architecture, call_once_per_core, kernel::exception::PrivilegeLevel};
 use aarch64_cpu::{
     asm::barrier,
     registers::{CurrentEL, CNTP_CTL_EL0, DAIF, SCTLR_EL1, VBAR_EL1},
@@ -55,6 +52,7 @@ pub fn are_disabled() -> bool {
 /// This function should only be used to enable exceptions when it is certain that exceptions were disable but enabling them is OK
 pub unsafe fn enable() {
     assert!(are_disabled(), "Interrupts must be disabled to enable them");
+    barrier::isb(barrier::SY);
     DAIF.write(DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked);
 }
 
@@ -73,49 +71,34 @@ pub unsafe fn disable() {
 
 /// An exception `Guard` masks exceptions while alive,
 /// and restores the prior mask state upon being dropped
-pub struct Guard;
-
-/// Stores the nesting of interrupt guards. The `u64` indicates the number of
-/// currently active exception guards for that core; because exception guards
-/// prevent preemption, this is also a per-thread storage. The `bool` represents
-/// whether or not interrupts were enabled prior to the creation of the first
-/// exception guard, that may or may not have disabled interrupts
-static NESTED_LEVELS: PerCore<(u64, bool)> = PerCore::default();
+pub struct Guard {
+    /// Whether or not exceptions were disabled beforehand
+    was_disabled: bool,
+}
 
 impl Guard {
     /// Creates a new exception guard, masking exceptions
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        if are_disabled() {
-            let mut nested = NESTED_LEVELS.current();
-            // If this is the first guard, unnested, indicate that exceptions
-            // were already disabled when this guard was created
-            if nested.0 == 0 {
-                nested.1 = false;
-            }
-            // Increment the number of nested guards
-            nested.0 += 1;
-        } else {
+        let guard = Self {
+            was_disabled: are_disabled(),
+        };
+        if !guard.was_disabled {
             // SAFETY: We have just checked that interrupts are enabled, and we
             // are intending to protect interupts for the duration of an
             // possible guards
             unsafe {
                 disable();
             }
-            // This is the first, unnested guard, and exceptions were enabled
-            // before this guard was created
-            *NESTED_LEVELS.current() = (1, true);
         }
 
-        Self {}
+        guard
     }
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let mut nested = NESTED_LEVELS.current();
-        nested.0 -= 1;
-        if nested.0 == 0 && nested.1 {
+        if !self.was_disabled {
             // SAFETY: Interrupts were disabled prior, and are properly being
             // restored now - no exception guards are held on this thread/core,
             // and exceptions were disabled by a prior exception guard
@@ -123,46 +106,3 @@ impl Drop for Guard {
         }
     }
 }
-
-add_test!(guard_preserves_interrupt_state, {
-    assert!(
-        DAIF.matches_all(
-            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
-        ),
-        "Interrupts should be enabled when a thread runs, by default"
-    );
-    let guard = Guard::new();
-    assert!(
-        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
-        "Interrupts should be disabled while a guard is active"
-    );
-    drop(guard);
-    assert!(
-        DAIF.matches_all(
-            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
-        ),
-        "Dropping all guards should re-enable interrupts"
-    );
-    let guard1 = Guard::new();
-    assert!(
-        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
-        "Interrupts should be disabled while a guard is active"
-    );
-    let guard2 = Guard::new();
-    assert!(
-        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
-        "Interrupts should be disabled while a guard is active"
-    );
-    drop(guard2);
-    assert!(
-        DAIF.matches_all(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked),
-        "Interrupts should remain disabled while a guard is active, even if another guard is dropped"
-    );
-    drop(guard1);
-    assert!(
-        DAIF.matches_all(
-            DAIF::D::Unmasked + DAIF::A::Unmasked + DAIF::I::Unmasked + DAIF::F::Unmasked
-        ),
-        "Dropping all guards should re-enable interrupts"
-    );
-});

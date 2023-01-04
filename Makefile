@@ -166,20 +166,7 @@ define test_prepare
     @chmod +x target/kernel_test_runner.sh
 endef
 
-##------------------------------------------------------------------------------
-## Run unit test(s)
-##------------------------------------------------------------------------------
-test_unit:
-	$(call color_header, "Compiling unit tests")
+test:
+	$(call color_header, "Compiling tests")
 	$(call test_prepare)
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) --lib
-
-##------------------------------------------------------------------------------
-## Run integration test(s)
-##------------------------------------------------------------------------------
-test_integration:
-	$(call color_header, "Compiling integration tests")
-	$(call test_prepare)
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) $(TEST_ARG)
-
-test: test_integration
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(TEST_CMD) $(if $(TEST), --test $(TEST))

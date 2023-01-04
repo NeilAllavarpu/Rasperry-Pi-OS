@@ -1,6 +1,6 @@
 use crate::{
     kernel::heap::{FreeBlock, MIN_BLOCK_SIZE},
-    sync::{Mutex, SpinLock},
+    sync::{BlockingLock, Mutex},
 };
 use core::{
     mem,
@@ -12,7 +12,7 @@ use core::{
 /// A set of free memory blocks
 pub struct FreeSet {
     /// The head of the linked list
-    head: SpinLock<FreeBlock>,
+    head: BlockingLock<FreeBlock>,
     /// Number of elements in the set
     len: AtomicUsize,
 }
@@ -57,7 +57,7 @@ impl FreeSet {
         unsafe {
             free_pointer
                 .as_ptr()
-                .write(SpinLock::new(FreeBlock { next: node.next }));
+                .write(BlockingLock::new(FreeBlock { next: node.next }));
         }
         node.next = Some(free_pointer);
 
@@ -111,7 +111,7 @@ impl FreeSet {
         unsafe {
             free_pointer
                 .as_ptr()
-                .write(SpinLock::new(FreeBlock { next: node.next }));
+                .write(BlockingLock::new(FreeBlock { next: node.next }));
         }
         node.next = Some(free_pointer);
 
@@ -140,9 +140,9 @@ impl FreeSet {
 impl const Default for FreeSet {
     /// Creates a new empty set
     fn default() -> Self {
-        assert!(mem::size_of::<SpinLock<FreeBlock>>() <= MIN_BLOCK_SIZE);
+        assert!(mem::size_of::<BlockingLock<FreeBlock>>() <= MIN_BLOCK_SIZE);
         Self {
-            head: SpinLock::new(FreeBlock { next: None }),
+            head: BlockingLock::new(FreeBlock { next: None }),
             len: AtomicUsize::new(0),
         }
     }

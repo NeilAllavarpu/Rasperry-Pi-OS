@@ -1,3 +1,7 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+use aarch64_cpu::asm::{sev, wfe};
+
 use crate::{architecture, board, call_once, kernel, log, thread};
 
 extern "Rust" {
@@ -27,10 +31,6 @@ pub extern "C" fn init() -> ! {
 
             log!("What just happened? Why am I here?");
 
-            thread::schedule(thread::spawn(||
-                // SAFETY: `kernel_main` is appropriately defined by the build system
-                   kernel_main()));
-
             board::wake_all_cores();
         }
 
@@ -42,6 +42,11 @@ pub extern "C" fn init() -> ! {
 /// # Safety
 /// Must only be called once per core
 unsafe fn per_core_init() -> ! {
+    /// Number of cores that finished initialization
+    static FINISHED_CORES: AtomicUsize = AtomicUsize::new(0);
+    /// Number of cores
+    const NUM_CORES: usize = 4;
+
     // Make sure this is running in EL1
     assert_eq!(
         architecture::exception::el(),
@@ -59,6 +64,17 @@ unsafe fn per_core_init() -> ! {
     // SAFETY: This is the first time we are enabling exceptions
     unsafe {
         architecture::exception::enable();
+    }
+
+    if FINISHED_CORES.fetch_add(1, Ordering::SeqCst) + 1 == NUM_CORES {
+        sev();
+        thread::schedule(thread::spawn(||
+            // SAFETY: `kernel_main` is appropriately defined by the build system
+            unsafe { kernel_main(); }));
+    } else {
+        while FINISHED_CORES.load(Ordering::SeqCst) != NUM_CORES {
+            wfe();
+        }
     }
 
     thread::idle_loop();

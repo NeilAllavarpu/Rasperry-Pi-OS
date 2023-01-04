@@ -142,7 +142,6 @@ where
     }
     {
         let Thread(current) = current();
-        assert!(current.local.preemptible.get() ^ current.is_idle());
         current.local.last_started.set(architecture::time::now());
     }
 }

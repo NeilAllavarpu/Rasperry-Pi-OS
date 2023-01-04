@@ -13,3 +13,7 @@ pub use mutex::*;
 /// A busy-wait mutex
 mod spinlock;
 pub use spinlock::SpinLock;
+
+/// A blocking mutex
+mod blocking_lock;
+pub use blocking_lock::BlockingLock;
