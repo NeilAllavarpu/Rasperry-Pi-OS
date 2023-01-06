@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use aarch64_cpu::asm::{sev, wfe};
 
-use crate::{architecture, board, call_once, kernel, log, thread};
+use crate::{architecture, board, call_once, kernel, log, memory, thread};
 
 extern "Rust" {
     /// The `kernel_init()` for unit tests.
@@ -12,6 +12,10 @@ extern "Rust" {
 /// Global initialization of the system
 #[no_mangle]
 pub extern "C" fn init() -> ! {
+    if architecture::machine::core_id() == 0 {
+        memory::init();
+    }
+    memory::per_core_init();
     // SAFETY: This should only run once
     unsafe {
         if architecture::machine::core_id() == 0 {

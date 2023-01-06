@@ -22,7 +22,7 @@ struct FreeBlock {
 // TODO: Use a paging-based, dynamically sized heap
 /// The static start of the heap
 #[allow(clippy::as_conversions)]
-const HEAP_START: NonNull<()> = unsafe { NonNull::new_unchecked(0x20_0000 as *mut ()) };
+const HEAP_START: NonNull<()> = unsafe { NonNull::new_unchecked(0x10_0000 as *mut ()) };
 /// The static size of the heap
 const HEAP_SIZE: usize = 0x2_0000;
 

@@ -16,6 +16,7 @@
 #![feature(fn_traits)]
 #![feature(format_args_nl)]
 #![feature(inline_const)]
+#![feature(generic_arg_infer)]
 #![feature(let_chains)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
@@ -72,6 +73,8 @@ mod collections;
 mod kernel;
 /// Useful macros
 mod macros;
+/// MMU + Virtual Memory
+mod memory;
 /// Synchronization primitives
 mod sync;
 /// Native threads

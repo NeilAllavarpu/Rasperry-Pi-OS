@@ -182,11 +182,12 @@ impl kernel::Serial for Uart {
     }
 }
 
+// TODO: Improve mapping of peripherals
 /// The system-wide UART
 // Safety: This starting address should be correct for the Raspberry Pi 3, according to its specifications
 #[allow(clippy::undocumented_unsafe_blocks)] // Lint not working properly here
-#[allow(clippy::as_conversions)] // Lint not working properly here
-static UART: Uart = unsafe { Uart::new(0x3F20_1000 as *mut RegisterBlock) };
+#[allow(clippy::as_conversions)]
+static UART: Uart = unsafe { Uart::new(0x20_1000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection
 pub fn serial() -> &'static Uart {

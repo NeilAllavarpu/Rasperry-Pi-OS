@@ -5,6 +5,7 @@
 #![feature(const_nonnull_new)]
 #![feature(const_num_from_num)]
 #![feature(const_option)]
+#![feature(generic_arg_infer)]
 #![feature(const_option_ext)]
 #![feature(const_refs_to_cell)]
 #![feature(const_result_drop)]
@@ -34,6 +35,7 @@ pub mod cell;
 pub mod collections;
 pub mod kernel;
 pub mod macros;
+pub mod memory;
 pub mod sync;
 pub mod thread;
 

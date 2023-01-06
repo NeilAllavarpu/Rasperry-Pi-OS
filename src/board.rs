@@ -9,6 +9,35 @@ pub mod irq;
 
 use crate::call_once;
 
+/// The possible types of MMIO to register mappings for
+pub enum MmioDevices {
+    Uart = 0,
+    Peripheral = 1,
+    Local = 2,
+}
+
+/// Stores the virtual and physical addresses of the MMIO mapping
+pub struct MmioMapping {
+    pub physical_addr: usize,
+    pub virtual_addr: usize,
+}
+
+/// Memory mappings of board devices
+pub const MMIO_MAPPINGS: phf::Map<u8, MmioMapping> = phf::phf_map! {
+    0_u8 => MmioMapping {
+        physical_addr: 0x3F20_0000,
+        virtual_addr: 0x20_0000,
+    },
+    1_u8 => MmioMapping {
+        physical_addr: 0x4000_0000,
+        virtual_addr: 0x21_0000,
+    },
+    2_u8 => MmioMapping {
+        physical_addr: 0x3F00_0000,
+        virtual_addr: 0x22_0000,
+    }
+};
+
 extern "C" {
     // Must not be run on concurrent execution paths with the same core ID
     fn _per_core_init() -> !;

@@ -9,6 +9,8 @@ use tock_registers::{
     registers::{ReadOnly, WriteOnly},
 };
 
+use super::MMIO_MAPPINGS;
+
 register_bitfields! {u32,
     TIMER_CONTROL [
         CNT_PNS_IRQ OFFSET(1) NUMBITS(1) [],
@@ -65,15 +67,6 @@ register_structs! {
     }
 }
 
-/// Source: <https://datasheets.raspberrypi.com/bcm2836/bcm2836-peripherals.pdf>
-#[allow(clippy::as_conversions)]
-const LOCAL_REGISTERS_ADDRESS: *mut Local_IRQ_Register_Block =
-    0x4000_0000 as *mut Local_IRQ_Register_Block;
-/// Source: <https://datasheets.raspberrypi.com/bcm2836/bcm2836-peripherals.pdf>
-#[allow(clippy::as_conversions)]
-const PERIPH_REGISTERS_ADDRESS: *mut Peripheral_Register_Block =
-    0x3F00_B200 as *mut Peripheral_Register_Block;
-
 /// Wrapper for the memory-mapped IRQ registers
 struct Registers<T> {
     /// The actual registers
@@ -108,11 +101,11 @@ unsafe impl<T> Sync for Registers<T> {}
 /// The memory mapped IRQ-related registers
 #[allow(clippy::undocumented_unsafe_blocks)]
 static IRQ_REGISTERS: Registers<Local_IRQ_Register_Block> =
-    unsafe { Registers::new(LOCAL_REGISTERS_ADDRESS) };
+    unsafe { Registers::new(0x21_0000 as *mut _) };
 /// The memory mapped IRQ-related registers for peripherals
 static PERIPHERAL_REGISTERS: Registers<Peripheral_Register_Block> =
     // SAFETY: These registers are only ever used during the initialization process
-    unsafe { Registers::new(PERIPH_REGISTERS_ADDRESS) };
+    unsafe { Registers::new(0x22_B200 as *mut _) };
 
 /// Dispatches an IRQ to the correct handler
 #[allow(clippy::module_name_repetitions)]
@@ -179,7 +172,7 @@ fn handle_core_irq(interrupt_source: &ReadOnly<u32, INTERRUPT_SOURCE::Register>)
 pub fn init() {
     let control_registers =
         // SAFETY: These registers are only ever used during the initialization process
-        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(LOCAL_REGISTERS_ADDRESS.cast()) };
+        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(MMIO_MAPPINGS.get(&1).expect("Should be local mapping").virtual_addr as *mut _) };
 
     // Enable timer interrupts for all cores
     control_registers
