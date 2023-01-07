@@ -1,5 +1,3 @@
-/// Boot sequence + initialization
-mod boot;
 /// Exception-related information: masks and triggering/registering
 pub mod exception;
 /// Basic exception handlers
@@ -12,6 +10,9 @@ mod shutdown;
 pub mod time;
 
 pub use shutdown::shutdown;
+
+// The boot sequence
+core::arch::global_asm!(include_str!("architecture/boot.s"));
 
 /// Architecture-wide initialization
 /// # Safety

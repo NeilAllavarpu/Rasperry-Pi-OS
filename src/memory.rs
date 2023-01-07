@@ -119,7 +119,7 @@ static KERNEL_TABLE: BlockingLock<TranslationTable> = BlockingLock::new(Translat
 pub fn init() {
     let mut table = KERNEL_TABLE.lock();
 
-    for (n, entry) in table.descriptors[..32].iter_mut().enumerate() {
+    for (n, entry) in table.descriptors[..16].iter_mut().enumerate() {
         entry.set_valid(n * GRANULE_SIZE);
     }
 
