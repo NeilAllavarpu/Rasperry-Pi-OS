@@ -1,15 +1,9 @@
-use crate::{
-    board::MMIO_MAPPINGS,
-    sync::{BlockingLock, Mutex, SpinLock},
-};
-use aarch64_cpu::{
-    asm::barrier,
-    registers::{MAIR_EL1, SCTLR_EL1, TCR_EL1, TTBR0_EL1},
-};
+use crate::board::MMIO_MAPPINGS;
+use aarch64_cpu::asm::barrier;
 use core::ops::Deref;
 use tock_registers::{
     fields::FieldValue,
-    interfaces::{ReadWriteable, Readable, Writeable},
+    interfaces::{ReadWriteable, Writeable},
     register_bitfields,
     registers::InMemoryRegister,
 };
@@ -110,77 +104,23 @@ struct TranslationTable {
     descriptors: [PageDescriptor; 1 << 9],
 }
 
-/// The global translation table for the kernel address space
-static KERNEL_TABLE: BlockingLock<TranslationTable> = BlockingLock::new(TranslationTable {
-    descriptors: [const { PageDescriptor(InMemoryRegister::new(0)) }; _],
-});
-
-/// Sets up the basic kernel tables
-pub fn init() {
-    let mut table = KERNEL_TABLE.lock();
-
-    for (n, entry) in table.descriptors[..16].iter_mut().enumerate() {
-        entry.set_valid(n * GRANULE_SIZE);
-    }
-
-    for mapping in MMIO_MAPPINGS.values() {
-        table.descriptors[mapping.virtual_addr / GRANULE_SIZE].set_valid(mapping.physical_addr);
-        table.descriptors[mapping.virtual_addr / GRANULE_SIZE]
-            .modify(PAGE_DESCRIPTOR::AttrIndx.val(1));
-    }
+extern "Rust" {
+    /// The global translation table for the kernel address space
+    static mut KERNEL_TABLE: TranslationTable;
 }
 
-/// Enables the MMU on each core
-pub fn per_core_init() {
-    /// Unprivileged access to any address translated by `TTBR1_EL1` will generate a level 0 Translation fault.
-    const EOPD1_BIT: u8 = 56;
-    {
-        /// Prevents blocking from occurring during initialization
-        static MUTEX: SpinLock<()> = SpinLock::new(());
-        let _guard = MUTEX.lock();
+/// Sets up the peripheral mappings
+pub fn init() {
+    // SAFETY: No one else is concurrently using the tables
+    unsafe {
+        for mapping in MMIO_MAPPINGS.values() {
+            KERNEL_TABLE.descriptors[mapping.virtual_addr / GRANULE_SIZE]
+                .set_valid(mapping.physical_addr);
+            KERNEL_TABLE.descriptors[mapping.virtual_addr / GRANULE_SIZE]
+                .modify(PAGE_DESCRIPTOR::AttrIndx.val(1));
+        }
 
-        TTBR0_EL1.set_baddr(
-            KERNEL_TABLE
-                .lock()
-                .descriptors
-                .as_ptr()
-                .to_bits()
-                .try_into()
-                .expect("Pointers should be 64 bits"),
-        );
+        // Ensure changes are written
+        barrier::dmb(barrier::SY);
     }
-    TTBR0_EL1.modify(TTBR0_EL1::CnP::SET);
-
-    let mut tcr = TCR_EL1.extract();
-    tcr.set(1 << EOPD1_BIT);
-    TCR_EL1.modify_no_read(
-        tcr,
-        // DS implicitly disabled
-        // TODO: Implement MTE
-        // E0PD implicitly disabled
-        // TODO: Check SVE, TME
-        TCR_EL1::TBID1::SET
-            + TCR_EL1::TBID0::SET
-        // Hierarchical permissions implicitly enabled
-            + TCR_EL1::HD::Enable
-            + TCR_EL1::HA::Enable
-            + TCR_EL1::TBI1::Used
-            + TCR_EL1::TBI0::Used
-            + TCR_EL1::AS::ASID16Bits
-            + TCR_EL1::IPS::Bits_36 // 64GB
-            + TCR_EL1::A1::TTBR0
-            + TCR_EL1::TG0::KiB_64
-            + TCR_EL1::SH0::Inner
-            + TCR_EL1::ORGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-            + TCR_EL1::IRGN0::WriteBack_ReadAlloc_WriteAlloc_Cacheable
-            + TCR_EL1::T0SZ.val(39),
-    );
-
-    MAIR_EL1.write(
-        MAIR_EL1::Attr0_Normal_Outer::WriteBack_NonTransient_ReadWriteAlloc
-            + MAIR_EL1::Attr1_Device::nonGathering_nonReordering_noEarlyWriteAck,
-    );
-    barrier::isb(barrier::SY);
-    SCTLR_EL1.modify(SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable + SCTLR_EL1::M::Enable);
-    barrier::isb(barrier::SY);
 }

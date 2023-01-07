@@ -15,7 +15,7 @@ pub extern "C" fn init() -> ! {
     if architecture::machine::core_id() == 0 {
         memory::init();
     }
-    memory::per_core_init();
+
     // SAFETY: This should only run once
     unsafe {
         if architecture::machine::core_id() == 0 {

@@ -18,6 +18,10 @@ SECTIONS {
     } : segment_rodata
     .data : ALIGN(GRANULE_SIZE) {
         __data_start = .;
+        /* TODO: Figure out a safe way to dynamically reference this physical address */
+        ASSERT(. == 0xA0000, "Translation table is shifted");
+        KEEP(*(.data.table))
+        . += 4096;
         *(.data*)
     } : segment_data
     .bss (NOLOAD) : ALIGN(16) {
