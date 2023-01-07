@@ -101,11 +101,11 @@ unsafe impl<T> Sync for Registers<T> {}
 /// The memory mapped IRQ-related registers
 #[allow(clippy::undocumented_unsafe_blocks)]
 static IRQ_REGISTERS: Registers<Local_IRQ_Register_Block> =
-    unsafe { Registers::new(0x21_0000 as *mut _) };
+    unsafe { Registers::new(0xFFFF_FFFF_FE21_0000 as *mut _) };
 /// The memory mapped IRQ-related registers for peripherals
 static PERIPHERAL_REGISTERS: Registers<Peripheral_Register_Block> =
     // SAFETY: These registers are only ever used during the initialization process
-    unsafe { Registers::new(0x22_B200 as *mut _) };
+    unsafe { Registers::new(0xFFFF_FFFF_FE22_B200 as *mut _) };
 
 /// Dispatches an IRQ to the correct handler
 #[allow(clippy::module_name_repetitions)]
@@ -172,7 +172,7 @@ fn handle_core_irq(interrupt_source: &ReadOnly<u32, INTERRUPT_SOURCE::Register>)
 pub fn init() {
     let control_registers =
         // SAFETY: These registers are only ever used during the initialization process
-        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(MMIO_MAPPINGS.get(&1).expect("Should be local mapping").virtual_addr as *mut _) };
+        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(0xFFFF_FFFF_FE21_0000 as *mut _) };
 
     // Enable timer interrupts for all cores
     control_registers

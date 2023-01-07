@@ -19,6 +19,11 @@ _per_core_init:
     # Disable interrupts
     msr DAIFSET, #0b1111
 
+    # X8 stores the offset to mask to get to the virtual address space
+    movz x8, #0xFFFF, LSL #48
+    movk x8, #0xFFFF, LSL #32
+    movk x8, #0xFE00, LSL #16
+
     # Get core ID
     mrs	x0, MPIDR_EL1
 	and	x0, x0, #0b11
@@ -26,6 +31,7 @@ _per_core_init:
     # Pick an appropriate stack pointer
     add x0, x0, #1
     lsl x0, x0, #16
+    orr x0, x0, x8
     msr SP_EL1, x0
 
     # Disable hypervisor controls
@@ -42,6 +48,7 @@ _per_core_init:
 
     adrp x0, init
     add x0, x0, #:lo12:init
+    orr x0, x0, x8
     msr ELR_EL2, x0
 
     # Keep interrupts disabled in EL1, switch to the SP_EL1 stack
@@ -51,14 +58,15 @@ _per_core_init:
     # Set EL1's translation table + propertires
     # TODO: Don't hardcode this
     mov x0, #0xA0000
-    msr TTBR0_EL1, x0
+    msr TTBR1_EL1, x0
 
     mov	w10, #0xf0
     msr	MAIR_EL1, x10
 
-    mov x9, #0x7527
-    movk x9, #0x191, lsl #32
-    movk x9, #0x118, lsl #48
+    mov x9, #0xF527
+    movk x9, #0xF527, LSL #16
+    movk x9, #0x01D1, lsl #32
+    movk x9, #0x0118, lsl #48
     msr TCR_EL1, x9
     mov	x9, #0x1005
     msr SCTLR_EL1, x9

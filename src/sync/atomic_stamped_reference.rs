@@ -5,10 +5,9 @@ pub struct AtomicStampedPtr<T>(AtomicPtr<T>);
 
 #[cfg(target_pointer_width = "64")]
 impl<T> AtomicStampedPtr<T> {
-    // (Virtual) address are up to 52 bits wide. So let's use the upper 12 bits
-    // for our stamp
+    // TCR_EL1 is configured to allow the top byte to be used for tagging
     /// The number of bits for the pointer address
-    const PTR_BITS: u8 = 52;
+    const PTR_BITS: u8 = 56;
     /// The mask to extract a pointer from a stamped pointer
     const PTR_MASK: usize = (1 << Self::PTR_BITS) - 1;
     /// The mask to extract a stamp from a stamped pointer

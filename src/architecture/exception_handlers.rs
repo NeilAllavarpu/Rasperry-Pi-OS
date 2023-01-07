@@ -1,4 +1,4 @@
-use aarch64_cpu::registers::{ESR_EL1, FAR_EL1};
+use aarch64_cpu::registers::{ELR_EL1, ESR_EL1, FAR_EL1};
 use tock_registers::{interfaces::Readable, register_bitfields};
 
 use crate::{board, log};
@@ -89,7 +89,7 @@ fn handle_instruction_abort() {
 
     log!("{:b}", ESR_EL1.get() & 0b11_1111);
 
-    panic!("Unable to handle exception");
+    panic!("Unable to handle exception, from 0x{:X}", ELR_EL1.get());
 }
 
 /// Handler for a Data Abort
@@ -123,7 +123,7 @@ fn handle_data_abort() {
 
     log!("Raw ISS: {:0>25b}", ESR_EL1.read(ESR_EL1::ISS));
 
-    panic!("Unable to handle exception");
+    panic!("Unable to handle exception, from 0x{:X}", ELR_EL1.get());
 }
 
 #[allow(clippy::missing_docs_in_private_items)]

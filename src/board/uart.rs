@@ -187,7 +187,7 @@ impl kernel::Serial for Uart {
 // Safety: This starting address should be correct for the Raspberry Pi 3, according to its specifications
 #[allow(clippy::undocumented_unsafe_blocks)] // Lint not working properly here
 #[allow(clippy::as_conversions)]
-static UART: Uart = unsafe { Uart::new(0x20_1000 as *mut RegisterBlock) };
+static UART: Uart = unsafe { Uart::new(0xFFFF_FFFF_FE20_1000 as *mut RegisterBlock) };
 
 /// Gets the system-wide serial connection
 pub fn serial() -> &'static Uart {

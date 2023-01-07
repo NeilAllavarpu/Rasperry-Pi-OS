@@ -53,9 +53,21 @@ pub unsafe fn wake_all_cores() {
     // SAFETY: These addresses are taken from the spec for Raspbeery Pi 4
     unsafe {
         // Tell the cores to start running the per core init sequence
-        core::ptr::write_volatile(0xE0 as *mut unsafe extern "C" fn() -> !, _per_core_init);
-        core::ptr::write_volatile(0xE8 as *mut unsafe extern "C" fn() -> !, _per_core_init);
-        core::ptr::write_volatile(0xF0 as *mut unsafe extern "C" fn() -> !, _per_core_init);
+        // Mask, so that the address is a physical address instead of virtual
+        // TODO: Perform a conversion to get this address, instead of hard
+        // coding
+        core::ptr::write_volatile(
+            0xFFFF_FFFF_FE00_00E0 as *mut _,
+            (_per_core_init as *const ()).mask(0x1FF_FFFF),
+        );
+        core::ptr::write_volatile(
+            0xFFFF_FFFF_FE00_00E8 as *mut _,
+            (_per_core_init as *const ()).mask(0x1FF_FFFF),
+        );
+        core::ptr::write_volatile(
+            0xFFFF_FFFF_FE00_00F0 as *mut _,
+            (_per_core_init as *const ()).mask(0x1FF_FFFF),
+        );
     }
     // make sure the cores are notified to wake up
     aarch64_cpu::asm::sev();

@@ -2,9 +2,9 @@ GRANULE_SIZE = 64K;
 
 /* Starting PC of the boot sequence */
 __boot_addr = 0x80000;
-
+__link_addr = 0xFFFFFFFFFE000000;
 SECTIONS {
-    . =  __boot_addr;
+    . =  __link_addr + __boot_addr;
     .text : {
         __text_start = .;
         KEEP(*(.text._start))
@@ -19,7 +19,7 @@ SECTIONS {
     .data : ALIGN(GRANULE_SIZE) {
         __data_start = .;
         /* TODO: Figure out a safe way to dynamically reference this physical address */
-        ASSERT(. == 0xA0000, "Translation table is shifted");
+        ASSERT(. - __link_addr == 0xA0000, "Translation table is shifted");
         KEEP(*(.data.table))
         . += 4096;
         *(.data*)
