@@ -1,6 +1,7 @@
 use crate::{call_once, cell::InitCell, log, sync::BlockingLock};
 use core::{
     alloc::{GlobalAlloc, Layout},
+    cell::UnsafeCell,
     cmp::max,
     num::NonZeroUsize,
     ptr::NonNull,
@@ -18,13 +19,6 @@ struct FreeBlock {
     /// The next free node in the linked list
     next: NextPtr,
 }
-
-// TODO: Use a paging-based, dynamically sized heap
-/// The static start of the heap
-#[allow(clippy::as_conversions)]
-const HEAP_START: NonNull<()> = unsafe { NonNull::new_unchecked(0x10_0000 as *mut ()) };
-/// The static size of the heap
-const HEAP_SIZE: usize = 0x2_0000;
 
 /// The general purpose heap allocator for the kernel
 struct HeapAllocator<const MIN_BLOCK_SIZE: usize> {
@@ -171,7 +165,16 @@ pub unsafe fn log_allocator() {
 /// # Safety
 /// Must be initialized only once
 pub unsafe fn init() {
+    extern "Rust" {
+        static __heap_start: UnsafeCell<()>;
+        static __heap_size: UnsafeCell<()>;
+    }
     call_once!();
     // SAFETY: This is the correct time to initialize the heap, and only one core runs this
-    unsafe { KERNEL_HEAP.init(HEAP_START, HEAP_SIZE) }
+    unsafe {
+        KERNEL_HEAP.init(
+            NonNull::new(__heap_start.get()).expect("Heap start should not be null"),
+            __heap_size.get().to_bits(),
+        );
+    }
 }
