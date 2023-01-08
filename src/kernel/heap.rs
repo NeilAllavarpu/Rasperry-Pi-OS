@@ -1,4 +1,4 @@
-use crate::{call_once, cell::InitCell, log, sync::BlockingLock};
+use crate::{call_once, log, sync::BlockingLock};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cell::UnsafeCell,
@@ -6,7 +6,6 @@ use core::{
     num::NonZeroUsize,
     ptr::NonNull,
 };
-use smallvec::SmallVec;
 
 /// Set to store free blocks
 mod internal_set;
@@ -23,14 +22,14 @@ struct FreeBlock {
 /// The general purpose heap allocator for the kernel
 struct HeapAllocator<const MIN_BLOCK_SIZE: usize> {
     /// The various heap blocks
-    free_sets: InitCell<SmallVec<[FreeSet; 12]>>,
+    free_sets: [FreeSet; 12],
 }
 
 impl<const MIN_BLOCK_SIZE: usize> HeapAllocator<MIN_BLOCK_SIZE> {
     /// Creates a new, uninitialized heap allocator
     const fn new() -> Self {
         Self {
-            free_sets: InitCell::new(),
+            free_sets: [const { FreeSet::default() }; _],
         }
     }
 
@@ -38,10 +37,6 @@ impl<const MIN_BLOCK_SIZE: usize> HeapAllocator<MIN_BLOCK_SIZE> {
     unsafe fn init(&self, initial_start: NonNull<()>, initial_size: usize) {
         call_once!();
         // SAFETY: This is the init sequence
-        unsafe {
-            self.free_sets
-                .set(SmallVec::from(core::array::from_fn(|_| FreeSet::default())));
-        }
         assert_eq!((initial_size >> (self.free_sets.len() - 1)), MIN_BLOCK_SIZE);
         let set = self
             .free_sets

@@ -104,10 +104,11 @@ struct TranslationTable {
     descriptors: [PageDescriptor; 1 << 9],
 }
 
-extern "Rust" {
-    /// The global translation table for the kernel address space
-    static mut KERNEL_TABLE: TranslationTable;
-}
+/// The global translation table for the kernel address space
+#[no_mangle]
+static mut KERNEL_TABLE: TranslationTable = TranslationTable {
+    descriptors: [const { PageDescriptor(InMemoryRegister::new(0)) }; _],
+};
 
 /// Sets up the peripheral mappings
 pub fn init() {

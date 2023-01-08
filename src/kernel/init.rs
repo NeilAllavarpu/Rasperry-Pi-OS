@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use aarch64_cpu::asm::{sev, wfe};
 
@@ -12,15 +12,15 @@ extern "Rust" {
 /// Global initialization of the system
 #[no_mangle]
 pub extern "C" fn init() -> ! {
-    if architecture::machine::core_id() == 0 {
-        memory::init();
-    }
-
+    /// Whether or not initialization is complete
+    static MAIN_INIT_DONE: AtomicBool = AtomicBool::new(false);
     // SAFETY: This should only run once
     unsafe {
         if architecture::machine::core_id() == 0 {
             // This is the global initialization sequence; it should only run once
             call_once!();
+
+            memory::init();
 
             // Create the heap
             kernel::heap::init();
@@ -35,7 +35,12 @@ pub extern "C" fn init() -> ! {
 
             log!("What just happened? Why am I here?");
 
-            board::wake_all_cores();
+            MAIN_INIT_DONE.store(true, Ordering::Release);
+            sev();
+        } else {
+            while !MAIN_INIT_DONE.load(Ordering::Acquire) {
+                wfe();
+            }
         }
 
         per_core_init()
