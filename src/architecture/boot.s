@@ -36,7 +36,7 @@ _start:
 
     # Map the kernel data as read-write
     ADDRESS_OF x0, __data_start
-    ADDRESS_OF x0, __data_end
+    ADDRESS_OF x1, __data_end
     movk x2, #0x603 // Allow read-write permissions, disable execution
     bl map_region
 
