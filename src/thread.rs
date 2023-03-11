@@ -15,7 +15,7 @@ use core::{
     cmp::Reverse,
     num::NonZeroU64,
     ptr::NonNull,
-    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     time::Duration,
 };
 
@@ -287,15 +287,8 @@ pub unsafe fn init() {
 /// # Safety
 /// Must only be called once on each core, at the appropriate time
 pub unsafe fn per_core_init() {
-    /// Enforces mutual exclusion on the heap accesses so that no blocking occurs
-    static BUSY: AtomicBool = AtomicBool::new(false);
-    while BUSY.swap(true, Ordering::Acquire) {
-        wfe();
-    }
     // SAFETY: No preemption or blocking occurs here
     let cloned_arc = Arc::clone(unsafe { &IDLE_THREADS.current_unprotected().borrow().0 });
-    BUSY.store(false, Ordering::Release);
-    sev();
 
     // SAFETY: This is only run once per-core
     unsafe {

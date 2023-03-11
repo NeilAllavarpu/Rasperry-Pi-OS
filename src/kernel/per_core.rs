@@ -64,7 +64,7 @@ impl<T: ~const Default> const Default for PerCore<T> {
     /// the type `T`
     fn default() -> Self {
         Self {
-            data: [const { RefCell::new(T::default()) }; 4],
+            data: [const { RefCell::new(Default::default()) }; 4],
         }
     }
 }

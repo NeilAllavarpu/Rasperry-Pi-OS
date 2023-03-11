@@ -2,7 +2,7 @@ use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use aarch64_cpu::asm::{sev, wfe};
 
-use crate::{architecture, board, call_once, kernel, log, memory, thread};
+use crate::{architecture, board, call_once, kernel, log, thread};
 
 extern "Rust" {
     /// The `kernel_init()` for unit tests.
@@ -19,8 +19,6 @@ pub extern "C" fn init() -> ! {
         if architecture::machine::core_id() == 0 {
             // This is the global initialization sequence; it should only run once
             call_once!();
-
-            memory::init();
 
             // Create the heap
             kernel::heap::init();
@@ -75,15 +73,10 @@ unsafe fn per_core_init() -> ! {
         architecture::exception::enable();
     }
 
-    if FINISHED_CORES.fetch_add(1, Ordering::SeqCst) + 1 == NUM_CORES {
-        sev();
+    if FINISHED_CORES.fetch_add(1, Ordering::Relaxed) + 1 == NUM_CORES {
         thread::schedule(thread::spawn(||
             // SAFETY: `kernel_main` is appropriately defined by the build system
             unsafe { kernel_main(); }));
-    } else {
-        while FINISHED_CORES.load(Ordering::SeqCst) != NUM_CORES {
-            wfe();
-        }
     }
 
     thread::idle_loop();

@@ -1,18 +1,13 @@
-use crate::board::MMIO_MAPPINGS;
-use aarch64_cpu::asm::barrier;
 use core::ops::Deref;
 use tock_registers::{
-    fields::FieldValue,
-    interfaces::{ReadWriteable, Writeable},
-    register_bitfields,
-    registers::InMemoryRegister,
+    fields::FieldValue, interfaces::Writeable, register_bitfields, registers::InMemoryRegister,
 };
 
 #[cfg(not(target_pointer_width = "64"))]
 compile_error!("MMU for non-64 bit targets is not supported");
 
-/// Size of kernel granules
-const GRANULE_SIZE: usize = 1 << 16;
+/// The global kernel address space
+pub mod kernel;
 
 // A level 3 page descriptor, as per ARMv8-A Architecture Reference Manual Figure D5-17. (64 KiB Granule)
 register_bitfields! {usize,
@@ -25,8 +20,8 @@ register_bitfields! {usize,
         CONTIGUOUS OFFSET(52) NUMBITS(1) [],
         /// Dirty Bit Modifier
         DIRTY OFFSET(51) NUMBITS(1) [],
-        /// Physical address of the next table descriptor (lvl2) or the page descriptor (lvl3).
-        OUTPUT_ADDRESS OFFSET(16) NUMBITS(32) [], // [47:16]
+        /// Physical address of the page
+        OUTPUT_ADDRESS OFFSET(12) NUMBITS(36) [],
         /// If a lookup using this descriptor is cached in a TLB, determines whether the TLB entry applies to all ASID values, or only to the current ASID value
         NOT_GLOBAL OFFSET(11) NUMBITS(1) [],
         /// Access flag.
@@ -56,27 +51,44 @@ register_bitfields! {usize,
     ]
 }
 
+/// Generates a typed integer for representing pages
+macro_rules! typed_page {
+    ($label: ident) => {
+        #[derive(Clone, Copy)]
+        pub struct $label<const LOG_GRANULE_SIZE: u8>(pub usize);
+
+        impl<const LOG_GRANULE_SIZE: u8> $label<LOG_GRANULE_SIZE> {
+            pub const fn addr(&self) -> usize {
+                usize::from(self.0) << LOG_GRANULE_SIZE
+            }
+
+            pub const fn from_addr(addr: usize) -> Self {
+                Self(addr >> LOG_GRANULE_SIZE)
+            }
+        }
+    };
+}
+
+typed_page!(Ppn);
+typed_page!(Vpn);
+
 /// Represents a page descriptor in the level 3 translation table (64 KiB granules)
 #[repr(transparent)]
-struct PageDescriptor(<Self as Deref>::Target);
+pub struct PageDescriptor<const LOG_GRANULE_SIZE: u8>(<Self as Deref>::Target);
 
-impl PageDescriptor {
+impl<const LOG_GRANULE_SIZE: u8> PageDescriptor<LOG_GRANULE_SIZE> {
     /// Generates and validates an address field corresponding to the input address
-    fn addr(address: usize) -> FieldValue<usize, PAGE_DESCRIPTOR::Register> {
-        assert_eq!(address % GRANULE_SIZE, 0);
-
-        let shifted = address >> 16;
-        assert!(shifted < (1 << 16));
-        PAGE_DESCRIPTOR::OUTPUT_ADDRESS.val(shifted)
+    const fn addr(ppn: Ppn<LOG_GRANULE_SIZE>) -> FieldValue<usize, PAGE_DESCRIPTOR::Register> {
+        PAGE_DESCRIPTOR::OUTPUT_ADDRESS.val(ppn.addr() >> 12)
     }
 
     /// Sets the descriptor to be valid, pointing to the given granule
-    fn set_valid(&mut self, address: usize) {
+    pub fn set_valid(&mut self, ppn: Ppn<LOG_GRANULE_SIZE>) {
         self.write(
             PAGE_DESCRIPTOR::UXN::CLEAR
                 + PAGE_DESCRIPTOR::PXN::CLEAR
                 + PAGE_DESCRIPTOR::CONTIGUOUS::CLEAR
-                + Self::addr(address)
+                + Self::addr(ppn)
                 + PAGE_DESCRIPTOR::NOT_GLOBAL::CLEAR
                 + PAGE_DESCRIPTOR::SH::Outer
                 + PAGE_DESCRIPTOR::NOT_WRITEABLE::CLEAR
@@ -89,39 +101,10 @@ impl PageDescriptor {
     }
 }
 
-impl const Deref for PageDescriptor {
+impl<const LOG_GRANULE_SIZE: u8> const Deref for PageDescriptor<LOG_GRANULE_SIZE> {
     type Target = InMemoryRegister<usize, PAGE_DESCRIPTOR::Register>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-#[repr(C, align(4096))]
-/// The kernel translation table
-struct TranslationTable {
-    /// The actual descriptors
-    descriptors: [PageDescriptor; 1 << 9],
-}
-
-/// The global translation table for the kernel address space
-#[no_mangle]
-static mut KERNEL_TABLE: TranslationTable = TranslationTable {
-    descriptors: [const { PageDescriptor(InMemoryRegister::new(0)) }; _],
-};
-
-/// Sets up the peripheral mappings
-pub fn init() {
-    // SAFETY: No one else is concurrently using the tables
-    unsafe {
-        for mapping in MMIO_MAPPINGS.values() {
-            KERNEL_TABLE.descriptors[mapping.virtual_addr / GRANULE_SIZE]
-                .set_valid(mapping.physical_addr);
-            KERNEL_TABLE.descriptors[mapping.virtual_addr / GRANULE_SIZE]
-                .modify(PAGE_DESCRIPTOR::AttrIndx.val(1));
-        }
-
-        // Ensure changes are written
-        barrier::dmb(barrier::SY);
     }
 }

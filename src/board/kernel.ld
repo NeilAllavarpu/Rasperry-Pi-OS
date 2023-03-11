@@ -11,34 +11,26 @@ SECTIONS {
         __text_start = .;
         KEEP(*(.text._start))
         *(.text*)
+        __text_end = .;
     } : segment_code
     .rodata : ALIGN(GRANULE_SIZE) {
-        __text_end = .;
         __rodata_start = .;
         *(.rodata*)
+        __rodata_end = .;
     } : segment_rodata
     .data : ALIGN(GRANULE_SIZE) {
-        __rodata_end = .;
         __data_start = .;
         *(.data*)
+        __data_end = .;
     } : segment_data
     .bss (NOLOAD) : ALIGN(16) {
         __bss_start = .;
         *(.bss*);
-        . = ALIGN(16);
         __bss_end = .;
+        . = ALIGN(GRANULE_SIZE * 2);
+        __heap_start = .;
+        __heap_size = 0x20000;
+        . += __heap_size;
+
     } : segment_data
-    __init_stacks = .;
-    . += __init_stack_size * __num_cores;
-    . = ALIGN(GRANULE_SIZE * 2);
-    __heap_start = .;
-    __heap_size = 0x20000;
-    . += __heap_size;
-    __data_end = .;
-
-
-    ASSERT(SIZEOF(.bss) > 0, "BSS should not be empty")
-
-    .got : { *(.got*) }
-    ASSERT(SIZEOF(.got) == 0, "Relocation support not expected")
 }

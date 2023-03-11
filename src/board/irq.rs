@@ -9,7 +9,7 @@ use tock_registers::{
     registers::{ReadOnly, WriteOnly},
 };
 
-use super::MMIO_MAPPINGS;
+use super::{MmioDevices, MMIO_MAPPINGS};
 
 register_bitfields! {u32,
     TIMER_CONTROL [
@@ -172,7 +172,7 @@ fn handle_core_irq(interrupt_source: &ReadOnly<u32, INTERRUPT_SOURCE::Register>)
 pub fn init() {
     let control_registers =
         // SAFETY: These registers are only ever used during the initialization process
-        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(0xFFFF_FFFF_FE21_0000 as *mut _) };
+        unsafe { Mmio::<Local_IRQ_Register_Block_Init>::new(MMIO_MAPPINGS.get(&(MmioDevices::Peripheral as u8)).expect("Peripheral mapping should exist").virtual_addr as *mut _) };
 
     // Enable timer interrupts for all cores
     control_registers

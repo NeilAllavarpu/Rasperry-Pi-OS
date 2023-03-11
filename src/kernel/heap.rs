@@ -1,4 +1,8 @@
-use crate::{call_once, log, sync::BlockingLock};
+use crate::{
+    call_once, log,
+    memory::{kernel::KERNEL_TABLE, Ppn, Vpn},
+    sync::BlockingLock,
+};
 use core::{
     alloc::{GlobalAlloc, Layout},
     cell::UnsafeCell,
@@ -9,6 +13,7 @@ use core::{
 
 /// Set to store free blocks
 mod internal_set;
+use aarch64_cpu::asm::barrier;
 use internal_set::FreeSet;
 /// A pointer to the next node in the free set
 type NextPtr = Option<NonNull<BlockingLock<FreeBlock>>>;
@@ -37,6 +42,20 @@ impl<const MIN_BLOCK_SIZE: usize> HeapAllocator<MIN_BLOCK_SIZE> {
     unsafe fn init(&self, initial_start: NonNull<()>, initial_size: usize) {
         call_once!();
         // SAFETY: This is the init sequence
+        unsafe {
+            for offset in (0..initial_size).step_by(0x1_0000) {
+                // TODO: Dynamically allocate physical pages
+                KERNEL_TABLE
+                    .get_entry(Vpn::from_addr(initial_start.as_ptr().to_bits() + offset))
+                    .expect("Should be valid")
+                    .set_valid(Ppn::from_addr(
+                        initial_start.as_ptr().mask((1 << 25) - 1).to_bits() + offset,
+                    ));
+            }
+        }
+        // Ensure the mappings are made visible
+        barrier::dsb(barrier::ISHST);
+
         assert_eq!((initial_size >> (self.free_sets.len() - 1)), MIN_BLOCK_SIZE);
         let set = self
             .free_sets
