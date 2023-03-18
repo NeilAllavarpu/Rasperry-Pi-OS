@@ -10,15 +10,14 @@ use crate::{
     sync::Mutex,
 };
 use aarch64_cpu::{
-    asm::{barrier, eret, sev},
+    asm::{barrier, sev},
     registers::{
-        CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, FP, HCR_EL2, LR, MAIR_EL1, SCTLR_EL1, SPSR_EL2, SP_EL1,
-        TCR_EL1, TTBR1_EL1,
+        CNTHCTL_EL2, CNTVOFF_EL2, ELR_EL2, HCR_EL2, MAIR_EL1, SCTLR_EL1, SPSR_EL2, SP_EL1, TCR_EL1,
+        TTBR1_EL1,
     },
 };
 use core::{
     arch::asm,
-    cell::UnsafeCell,
     ptr::{addr_of, addr_of_mut},
 };
 use tock_registers::interfaces::{ReadWriteable, Writeable};
@@ -132,7 +131,7 @@ unsafe extern "C" fn start_rust() -> ! {
         static __data_start: ();
         static __data_end: ();
         static mut __bss_start: u8;
-        static mut __bss_end: u8;
+        static __bss_end: u8;
         static __kernel_stack_start: ();
     }
 
@@ -144,12 +143,11 @@ unsafe extern "C" fn start_rust() -> ! {
     // SAFETY: This is the initialization sequence, and so the BSS is not being
     // used yet. We need to zero it out beforehand.
     unsafe {
-        // Clear BSS
         core::ptr::write_bytes(
             addr_of_mut!(__bss_start),
             0,
-            addr_of_mut!(__bss_end)
-                .offset_from(addr_of_mut!(__bss_start))
+            addr_of!(__bss_end)
+                .offset_from(addr_of!(__bss_start))
                 .unsigned_abs(),
         );
     }
@@ -203,18 +201,13 @@ unsafe extern "C" fn start_rust() -> ! {
 /// Should only be called once per core in the boot process
 unsafe extern "C" fn per_core_start_rust(sp_offset: usize) -> ! {
     extern "Rust" {
-        static __kernel_stack_start: UnsafeCell<()>;
+        static __kernel_stack_start: ();
     }
 
     // Set the stack pointer in EL1 to be the top of the given page
     SP_EL1.set(usize_to_u64(
         // SAFETY: This is properly located in memory and not used by anything else
-        unsafe {
-            __kernel_stack_start
-                .get()
-                .byte_add(VIRTUAL_OFFSET + sp_offset)
-        }
-        .addr(),
+        unsafe { addr_of!(__kernel_stack_start).byte_add(VIRTUAL_OFFSET + sp_offset) }.addr(),
     ));
 
     // Disable EL2 controls
@@ -222,7 +215,7 @@ unsafe extern "C" fn per_core_start_rust(sp_offset: usize) -> ! {
                                                                 // Allows access to TME
                                                                 // Allows incoherency if inner and outer cacheability differ
                                                                 // Disables HVC instruction
-    HCR_EL2.write(
+    HCR_EL2.modify(
         HCR_EL2::API::DisableTrapPointerAuthInstToEl2
             + HCR_EL2::APK::DisableTrapPointerAuthKeyRegsToEl2
             + HCR_EL2::TEA::CLEAR
@@ -263,9 +256,10 @@ unsafe extern "C" fn per_core_start_rust(sp_offset: usize) -> ! {
             + TCR_EL1::A1::TTBR0
             + TCR_EL1::EPD0::DisableTTBR0Walks,
     );
-    TTBR1_EL1
-        // SAFETY: We only need the address of the kernel table which cannot be mutated
-        .write(TTBR1_EL1::BADDR.val(usize_to_u64(addr_of!(*KERNEL_TABLE.lock()).addr()) >> 1));
+    TTBR1_EL1.write(
+        TTBR1_EL1::BADDR.val(usize_to_u64(addr_of!(*KERNEL_TABLE.lock()).addr()) >> 1)
+            + TTBR1_EL1::CnP::SET,
+    );
 
     MAIR_EL1.write(
         MAIR_EL1::Attr0_Normal_Inner::WriteBack_Transient_ReadWriteAlloc
@@ -295,7 +289,7 @@ unsafe extern "C" fn per_core_start_rust(sp_offset: usize) -> ! {
     #[allow(clippy::fn_to_numeric_cast_any)]
     ELR_EL2.set(usize_to_u64(kernel::init as usize + VIRTUAL_OFFSET));
 
-    SPSR_EL2.modify(
+    SPSR_EL2.write(
         SPSR_EL2::D::Masked
             + SPSR_EL2::A::Masked
             + SPSR_EL2::I::Masked
@@ -303,10 +297,17 @@ unsafe extern "C" fn per_core_start_rust(sp_offset: usize) -> ! {
             + SPSR_EL2::M::EL1h,
     );
 
-    // Clear FP/LR to indicate the end of a call stack
-    FP.set(0);
-    LR.set(0);
-
-    // Launch into the kernel main
-    eret();
+    // This needs to be inlined so that any function calls that may occur
+    // don't clobber this
+    // SAFETY: Clearing the FP/LR is safe because this function never returns
+    // and we have set up everything for a proper `eret`, which should be
+    // interpreted by the main kernel as the true start of the call stack
+    unsafe {
+        asm!(
+            "mov FP, #0",
+            "mov LR, #0",
+            "eret",
+            options(nomem, nostack, noreturn)
+        );
+    }
 }
