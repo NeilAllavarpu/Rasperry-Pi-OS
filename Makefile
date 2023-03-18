@@ -32,7 +32,10 @@ KERNEL_ELF_DEPS = $(shell find src -type f) $(KERNEL_MANIFEST)
 RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
     -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
     -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) \
-		-C target-cpu=cortex-a53
+	-C link-arg=--relax							 \
+	-C link-arg=--sort-section=alignment		 \
+	-C link-arg=--warn-common					 \
+	-C target-cpu=cortex-a53
 RUSTFLAGS_DEBUG = -g
 RUSTFLAGS_NODEBUG = --release
 

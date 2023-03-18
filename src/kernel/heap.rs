@@ -1,7 +1,10 @@
 use crate::{
     call_once, log,
-    memory::{kernel::KERNEL_TABLE, Ppn, Vpn},
-    sync::BlockingLock,
+    memory::{
+        base_attributes_global, kernel::KERNEL_TABLE, valid_attributes, writeable_attributes, Ppn,
+        Vpn,
+    },
+    sync::{BlockingLock, Mutex},
 };
 use core::{
     alloc::{GlobalAlloc, Layout},
@@ -41,18 +44,18 @@ impl<const MIN_BLOCK_SIZE: usize> HeapAllocator<MIN_BLOCK_SIZE> {
     /// Initializes the heap allocator
     unsafe fn init(&self, initial_start: NonNull<()>, initial_size: usize) {
         call_once!();
-        // SAFETY: This is the init sequence
-        unsafe {
-            for offset in (0..initial_size).step_by(0x1_0000) {
-                // TODO: Dynamically allocate physical pages
-                KERNEL_TABLE
-                    .get_entry(Vpn::from_addr(initial_start.as_ptr().to_bits() + offset))
-                    .expect("Should be valid")
-                    .set_valid(Ppn::from_addr(
-                        initial_start.as_ptr().mask((1 << 25) - 1).to_bits() + offset,
-                    ));
-            }
+        for offset in (0..initial_size).step_by(0x1_0000) {
+            // TODO: Dynamically allocate physical pages
+            KERNEL_TABLE
+                .lock()
+                .get_entry(Vpn::from_addr(initial_start.as_ptr().to_bits() + offset))
+                .expect("Should be valid")
+                .set(
+                    Ppn::from_addr(initial_start.as_ptr().mask((1 << 25) - 1).to_bits() + offset),
+                    base_attributes_global() + valid_attributes() + writeable_attributes(),
+                );
         }
+
         // Ensure the mappings are made visible
         barrier::dsb(barrier::ISHST);
 

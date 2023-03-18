@@ -9,7 +9,11 @@ pub mod irq;
 
 use crate::{
     call_once,
-    memory::{kernel::KERNEL_TABLE, Ppn, Vpn},
+    memory::{
+        base_attributes_global, kernel::KERNEL_TABLE, valid_attributes, writeable_attributes, Ppn,
+        Vpn,
+    },
+    sync::Mutex,
 };
 
 /// The possible types of MMIO to register mappings for
@@ -46,12 +50,14 @@ pub const MMIO_MAPPINGS: phf::Map<u8, MmioMapping> = phf::phf_map! {
 pub unsafe fn init() {
     call_once!();
     for mapping in MMIO_MAPPINGS.values() {
-        unsafe {
-            KERNEL_TABLE
-                .get_entry(Vpn::from_addr(mapping.virtual_addr))
-                .expect("Should be valid")
-                .set_valid(Ppn::from_addr(mapping.physical_addr));
-        }
+        KERNEL_TABLE
+            .lock()
+            .get_entry(Vpn::from_addr(mapping.virtual_addr))
+            .expect("Should be valid")
+            .set(
+                Ppn::from_addr(mapping.physical_addr),
+                base_attributes_global() + valid_attributes() + writeable_attributes(),
+            );
     }
     serial().init();
     irq::init();

@@ -10,7 +10,6 @@ extern "Rust" {
 }
 
 /// Global initialization of the system
-#[no_mangle]
 pub extern "C" fn init() -> ! {
     /// Whether or not initialization is complete
     static MAIN_INIT_DONE: AtomicBool = AtomicBool::new(false);

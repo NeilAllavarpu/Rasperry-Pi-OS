@@ -1,4 +1,4 @@
-use core::ops::Deref;
+use core::iter::Step;
 use tock_registers::{
     fields::FieldValue, interfaces::Writeable, register_bitfields, registers::InMemoryRegister,
 };
@@ -54,7 +54,7 @@ register_bitfields! {usize,
 /// Generates a typed integer for representing pages
 macro_rules! typed_page {
     ($label: ident) => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, PartialEq, PartialOrd)]
         pub struct $label<const LOG_GRANULE_SIZE: u8>(pub usize);
 
         impl<const LOG_GRANULE_SIZE: u8> $label<LOG_GRANULE_SIZE> {
@@ -66,6 +66,20 @@ macro_rules! typed_page {
                 Self(addr >> LOG_GRANULE_SIZE)
             }
         }
+
+        impl<const __: u8> Step for $label<__> {
+            fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+                return end.0.checked_sub(start.0);
+            }
+
+            fn forward_checked(start: Self, count: usize) -> Option<Self> {
+                return start.0.checked_add(start.0 - count).map(Self);
+            }
+
+            fn backward_checked(start: Self, count: usize) -> Option<Self> {
+                return start.0.checked_sub(start.0 - count).map(Self);
+            }
+        }
     };
 }
 
@@ -74,37 +88,65 @@ typed_page!(Vpn);
 
 /// Represents a page descriptor in the level 3 translation table (64 KiB granules)
 #[repr(transparent)]
-pub struct PageDescriptor<const LOG_GRANULE_SIZE: u8>(<Self as Deref>::Target);
+pub struct PageDescriptor<const LOG_GRANULE_SIZE: u8>(
+    InMemoryRegister<usize, PAGE_DESCRIPTOR::Register>,
+);
+
+/// Attributes for a page descriptor
+pub type PageDescriptorAttributes = FieldValue<usize, PAGE_DESCRIPTOR::Register>;
+
+/// Base attributes that every valid page descriptor must have
+pub fn base_attributes() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::UXN::CLEAR
+        + PAGE_DESCRIPTOR::PXN::CLEAR
+        + PAGE_DESCRIPTOR::CONTIGUOUS::CLEAR
+        + PAGE_DESCRIPTOR::NOT_GLOBAL::SET
+        + PAGE_DESCRIPTOR::SH::Outer
+        + PAGE_DESCRIPTOR::EL0_ACCESSIBLE::CLEAR
+        + PAGE_DESCRIPTOR::AttrIndx.val(0)
+        + PAGE_DESCRIPTOR::TYPE::Page
+}
+
+/// Base attributes that every valid page descriptor must have, as well as marking this as a global page
+pub fn base_attributes_global() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::UXN::CLEAR
+        + PAGE_DESCRIPTOR::PXN::CLEAR
+        + PAGE_DESCRIPTOR::CONTIGUOUS::CLEAR
+        + PAGE_DESCRIPTOR::NOT_GLOBAL::CLEAR
+        + PAGE_DESCRIPTOR::SH::Outer
+        + PAGE_DESCRIPTOR::EL0_ACCESSIBLE::CLEAR
+        + PAGE_DESCRIPTOR::AttrIndx.val(0)
+        + PAGE_DESCRIPTOR::TYPE::Page
+}
+
+/// Sets a page descriptor to be valid
+pub fn valid_attributes() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::AF::SET + PAGE_DESCRIPTOR::VALID::SET
+}
+
+/// Sets a page descriptor to be invalid
+pub const fn invalid_attributes() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::VALID::CLEAR
+}
+
+/// Sets a page descriptor to be read-write
+pub const fn writeable_attributes() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::NOT_WRITEABLE::CLEAR
+}
+
+/// Sets a page descriptor to be read-only
+pub const fn read_only_attributes() -> PageDescriptorAttributes {
+    PAGE_DESCRIPTOR::NOT_WRITEABLE::SET
+}
 
 impl<const LOG_GRANULE_SIZE: u8> PageDescriptor<LOG_GRANULE_SIZE> {
     /// Generates and validates an address field corresponding to the input address
-    const fn addr(ppn: Ppn<LOG_GRANULE_SIZE>) -> FieldValue<usize, PAGE_DESCRIPTOR::Register> {
+    pub const fn addr_attributes(ppn: Ppn<LOG_GRANULE_SIZE>) -> PageDescriptorAttributes {
         PAGE_DESCRIPTOR::OUTPUT_ADDRESS.val(ppn.addr() >> 12)
     }
 
     /// Sets the descriptor to be valid, pointing to the given granule
-    pub fn set_valid(&mut self, ppn: Ppn<LOG_GRANULE_SIZE>) {
-        self.write(
-            PAGE_DESCRIPTOR::UXN::CLEAR
-                + PAGE_DESCRIPTOR::PXN::CLEAR
-                + PAGE_DESCRIPTOR::CONTIGUOUS::CLEAR
-                + Self::addr(ppn)
-                + PAGE_DESCRIPTOR::NOT_GLOBAL::CLEAR
-                + PAGE_DESCRIPTOR::SH::Outer
-                + PAGE_DESCRIPTOR::NOT_WRITEABLE::CLEAR
-                + PAGE_DESCRIPTOR::EL0_ACCESSIBLE::CLEAR
-                + PAGE_DESCRIPTOR::AttrIndx.val(0)
-                + PAGE_DESCRIPTOR::TYPE::Page
-                + PAGE_DESCRIPTOR::AF::SET
-                + PAGE_DESCRIPTOR::VALID::SET,
-        );
-    }
-}
-
-impl<const LOG_GRANULE_SIZE: u8> const Deref for PageDescriptor<LOG_GRANULE_SIZE> {
-    type Target = InMemoryRegister<usize, PAGE_DESCRIPTOR::Register>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    pub fn set(&mut self, ppn: Ppn<LOG_GRANULE_SIZE>, attributes: PageDescriptorAttributes) {
+        self.0.write(attributes + Self::addr_attributes(ppn));
     }
 }

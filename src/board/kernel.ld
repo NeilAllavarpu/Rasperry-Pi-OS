@@ -1,36 +1,40 @@
 GRANULE_SIZE = 64K;
 
 /* Starting PC of the boot sequence */
-__boot_addr = 0x80000;
-__link_addr = 0xFFFFFFFFFE000000;
-__init_stack_size = 0x1000;
-__num_cores = 4;
+__link_addr = 0xFFFFFFFFFE080000;
+
+ENTRY(_start)
 SECTIONS {
-    . =  __link_addr + __boot_addr;
-    .text : {
-        __text_start = .;
-        KEEP(*(.text._start))
+    .text __link_addr : {
+        *(.text._start)
         *(.text*)
-        __text_end = .;
     } : segment_code
     .rodata : ALIGN(GRANULE_SIZE) {
-        __rodata_start = .;
         *(.rodata*)
-        __rodata_end = .;
     } : segment_rodata
     .data : ALIGN(GRANULE_SIZE) {
-        __data_start = .;
         *(.data*)
-        __data_end = .;
     } : segment_data
-    .bss (NOLOAD) : ALIGN(16) {
-        __bss_start = .;
+    .bss (NOLOAD) : {
         *(.bss*);
-        __bss_end = .;
-        . = ALIGN(GRANULE_SIZE * 2);
-        __heap_start = .;
-        __heap_size = 0x20000;
-        . += __heap_size;
-
     } : segment_data
+    . = ALIGN(GRANULE_SIZE);
+    __kernel_stack_start = .;
+    . += GRANULE_SIZE * 4;
+    . = ALIGN(GRANULE_SIZE * 2);
+    __heap_start = .;
+    __heap_size = 0x20000;
 }
+
+/* Start + end of sections */
+__text_start = ADDR(.text);
+__text_end = __text_start + SIZEOF(.text);
+
+__rodata_start = ADDR(.rodata);
+__rodata_end = __rodata_start + SIZEOF(.rodata);
+
+__data_start = ADDR(.data);
+__data_end = __data_start + SIZEOF(.data);
+
+__bss_start = ADDR(.bss);
+__bss_end = __bss_start + SIZEOF(.bss);

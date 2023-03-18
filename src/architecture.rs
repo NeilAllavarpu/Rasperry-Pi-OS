@@ -1,3 +1,5 @@
+/// Boot sequence
+mod boot;
 /// Exception-related information: masks and triggering/registering
 pub mod exception;
 /// Basic exception handlers
@@ -8,18 +10,7 @@ pub mod machine;
 mod shutdown;
 /// Timer support
 pub mod time;
-
-use core::mem::MaybeUninit;
-
 pub use shutdown::shutdown;
-
-// The boot sequence
-core::arch::global_asm!(include_str!("architecture/boot.s"));
-
-/// Boot stacks
-#[no_mangle]
-static mut INIT_STACKS: [[MaybeUninit<u128>; 4096 / core::mem::size_of::<MaybeUninit<u128>>()]; 4] =
-    [const { [const { MaybeUninit::uninit() }; _] }; _];
 
 /// Architecture-wide initialization
 /// # Safety

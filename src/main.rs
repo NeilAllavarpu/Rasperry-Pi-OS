@@ -1,6 +1,7 @@
 //! A Raspberry Pi Operating System
 #![no_main]
 #![no_std]
+#![feature(asm_const)]
 #![feature(const_cmp)]
 #![feature(const_convert)]
 #![feature(const_default_impls)]
@@ -21,6 +22,7 @@
 #![feature(inline_const)]
 #![feature(generic_arg_infer)]
 #![feature(let_chains)]
+#![feature(naked_functions)]
 #![feature(once_cell)]
 #![feature(panic_info_message)]
 #![feature(pointer_byte_offsets)]
@@ -28,6 +30,7 @@
 #![feature(ptr_mask)]
 #![feature(ptr_metadata)]
 #![feature(ptr_to_from_bits)]
+#![feature(step_trait)]
 #![feature(strict_provenance)]
 #![reexport_test_harness_main = "test_main"]
 #![test_runner(_test_runner)]
@@ -56,6 +59,7 @@
 #![allow(clippy::default_numeric_fallback)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::inline_asm_x86_intel_syntax)]
 
 use aarch64_cpu::asm::wfi;
 

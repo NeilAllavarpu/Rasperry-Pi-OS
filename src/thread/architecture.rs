@@ -45,7 +45,6 @@ pub unsafe fn set_me(Thread(thread): Thread) {
 
 /// The first path of execution for a newly created thread
 /// Jumps directly to the run method for the thread
-#[no_mangle]
 extern "C" fn thread_trampoline() -> ! {
     assert!(!exception::are_disabled());
     // SAFETY:
