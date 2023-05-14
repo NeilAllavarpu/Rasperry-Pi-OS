@@ -23,7 +23,7 @@ export LD_SCRIPT_PATH
 
 # Dependencies
 KERNEL_MANIFEST      = Cargo.toml
-KERNEL_LINKER_SCRIPT = kernel.ld
+KERNEL_LINKER_SCRIPT = src/bin/kernel/boot/kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
 KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
 KERNEL_ELF_DEPS = $(shell find src -type f) $(KERNEL_MANIFEST)
@@ -142,7 +142,7 @@ objdump: $(KERNEL_ELF)
 ##------------------------------------------------------------------------------
 nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
-	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
+	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_DEBUG_ELF) | sort | rustfilt
 
 ##------------------------------------------------------------------------------
 ## Helpers for unit and integration test targets

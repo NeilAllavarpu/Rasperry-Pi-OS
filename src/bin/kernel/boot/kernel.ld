@@ -1,7 +1,7 @@
 GRANULE_SIZE = 64K;
 
 /* Starting PC of the boot sequence */
-__link_addr = 0xFFFFFFFFFE080000;
+__link_addr = 0xFFFFFFFFFE000000;
 
 ENTRY(_start)
 SECTIONS {

@@ -4,20 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aarch64-cpu = "*"
-phf = { version = "*", default-features=false, features=["macros"] }
 qemu-exit = "*"
-smallvec = { version = "*", features = ["union", "const_generics", "const_new", "specialization"] }
-tock-registers = "*"
-[lib]
-name = "libkernel"
-test = true
 
 [[bin]]
 name = "kernel"
-path = "src/main.rs"
 test = false
 
 [features]
-default = []
+default = ["rpi3"]
+rpi3 = []
 verbose = []
