@@ -7,23 +7,17 @@ ENTRY(_start)
 SECTIONS {
     .text __link_addr : {
         *(.text._start)
-        *(.text*)
+        *(.text* )
     } : segment_code
-    .rodata : ALIGN(GRANULE_SIZE) {
+    .rodata : {
         *(.rodata*)
     } : segment_rodata
-    .data : ALIGN(GRANULE_SIZE) {
+    .data : {
         *(.data*)
     } : segment_data
-    .bss (NOLOAD) : {
+    .bss : {
         *(.bss*);
     } : segment_data
-    . = ALIGN(GRANULE_SIZE);
-    __kernel_stack_start = .;
-    . += GRANULE_SIZE * 4;
-    . = ALIGN(GRANULE_SIZE * 2);
-    __heap_start = .;
-    __heap_size = 0x20000;
 }
 
 /* Start + end of sections */

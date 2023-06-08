@@ -9,12 +9,11 @@ KERNEL_BIN        = kernel8.img
 KERNEL_DEBUG_BIN  = kernel8_debug.img
 QEMU_BINARY       = qemu-system-aarch64
 QEMU_MACHINE_TYPE = raspi3
-QEMU_ARGS 		  = -serial stdio -display none -smp 4 -semihosting
+QEMU_ARGS 		  = -serial stdio -display none -smp 4 -semihosting -drive file=img.data,if=sd,format=raw
 QEMU_DEBUG_ARGS   = -serial stdio -display none -smp 4 -semihosting -s -S
 OBJDUMP_BINARY    = aarch64-none-elf-objdump
 NM_BINARY         = aarch64-none-elf-nm
 READELF_BINARY    = aarch64-none-elf-readelf
-LD_SCRIPT_PATH    = $(shell pwd)/src/board
 
 VERBOSE ?= 0
 
@@ -25,29 +24,25 @@ export LD_SCRIPT_PATH
 KERNEL_MANIFEST      = Cargo.toml
 KERNEL_LINKER_SCRIPT = src/bin/kernel/boot/kernel.ld
 KERNEL_ELF      	 ?= target/$(TARGET)/release/kernel
+FS_ELF      	 ?= target/$(TARGET)/release/fs
 KERNEL_DEBUG_ELF     ?= target/$(TARGET)/debug/kernel
+FS_DEBUG_ELF     ?= target/$(TARGET)/debug/fs
 KERNEL_ELF_DEPS = $(shell find src -type f) $(KERNEL_MANIFEST)
 
 # Rust + other build things
-RUSTFLAGS = $(RUSTC_MISC_ARGS)                   \
-    -C link-arg=--library-path=$(LD_SCRIPT_PATH) \
-    -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) \
-	-C link-arg=--relax							 \
-	-C link-arg=--sort-section=alignment		 \
-	-C link-arg=--warn-common					 \
-	-C target-cpu=cortex-a53
+RUSTFLAGS = $(RUSTC_MISC_ARGS) \
+	-C code-model=tiny \
+	-C link-args=--relax \
+	-C link-arg=--sort-section=alignment \
+	-C target-cpu=cortex-a53 \
+	-C force-frame-pointers=false \
+	-C force-unwind-tables=false \
+	-C linker-plugin-lto=true \
 RUSTFLAGS_DEBUG = -g
-RUSTFLAGS_NODEBUG = --release
+RUSTFLAGS_NODEBUG = -C strip=symbols
 
-RUSTFLAGS_PEDANTIC = $(RUSTFLAGS) \
-    # -D warnings                   \
-    -D missing_docs
 
-COMPILER_ARGS = --target=$(TARGET) --manifest-path $(KERNEL_MANIFEST) --features=verbose
-
-ifeq ($(VERBOSE), 1)
-COMPILER_ARGS += --features=verbose
-endif
+COMPILER_ARGS = --target=$(TARGET) --manifest-path $(KERNEL_MANIFEST)
 
 RUSTC_CMD   = cargo rustc $(COMPILER_ARGS)
 DOC_CMD     = cargo doc $(COMPILER_ARGS)
@@ -56,6 +51,8 @@ TEST_CMD    = cargo test $(COMPILER_ARGS) --release
 OBJCOPY_CMD = rust-objcopy \
     --strip-all            \
     -O binary
+
+OBJCOPY_DEBUG = rust-objcopy -O binary
 
 EXEC_QEMU = $(QEMU_BINARY) -M $(QEMU_MACHINE_TYPE)
 
@@ -72,30 +69,31 @@ DOCKER_TEST  = $(DOCKER_CMD) $(DOCKER_ARG_DIR_COMMON) $(DOCKER_IMAGE)
 
 all: $(KERNEL_BIN)
 
-tmp:
-	$(shell echo $(KERNEL_ELF_DEPS))
-
 # Compile the kernel
 $(KERNEL_ELF): $(KERNEL_ELF_DEPS)
 	$(call color_header, "Compiling kernel ELF")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD) $(RUSTFLAGS_NODEBUG)
+	@RUSTFLAGS="$(RUSTFLAGS_NODEBUG)" $(RUSTC_CMD) --release --bin fs
+	@RUSTFLAGS="$(RUSTFLAGS_NODEBUG) -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) -C no-redzone=false" $(RUSTC_CMD) --release --bin kernel
 
 $(KERNEL_DEBUG_ELF): $(KERNEL_ELF_DEPS)
 	$(call color_header, "Compiling kernel ELF")
-	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC) $(RUSTFLAGS_DEBUG)" $(RUSTC_CMD)
+	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(RUSTC_CMD) --bin fs
+	@RUSTFLAGS="$(RUSTFLAGS_DEBUG) -C link-arg=--script=$(KERNEL_LINKER_SCRIPT) -C no-redzone=false" $(RUSTC_CMD) --bin kernel
 
 # Generate binary
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(call color_header, "Generating stripped binary")
 	@$(OBJCOPY_CMD) $(KERNEL_ELF) $(KERNEL_BIN)
+	@python3 append_size.py $(KERNEL_BIN) $(FS_ELF)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_BIN)
 	$(call color_progress_prefix, "Size")
 	$(call disk_usage_KiB, $(KERNEL_BIN))
 
 $(KERNEL_DEBUG_BIN): $(KERNEL_DEBUG_ELF)
-	$(call color_header, "Generating stripped binary")
-	@$(OBJCOPY_CMD) $(KERNEL_DEBUG_ELF) $(KERNEL_DEBUG_BIN)
+	$(call color_header, "Generating binary")
+	@$(OBJCOPY_DEBUG) $(KERNEL_DEBUG_ELF) $(KERNEL_DEBUG_BIN)
+	@python3 append_size.py $(KERNEL_DEBUG_BIN) $(FS_ELF)
 	$(call color_progress_prefix, "Name")
 	@echo $(KERNEL_DEBUG_BIN)
 	$(call color_progress_prefix, "Size")
@@ -113,6 +111,9 @@ qemu_debug: $(KERNEL_DEBUG_BIN)
 gdb:
 	docker exec -it $(shell docker ps | grep $(DOCKER_IMAGE) | head -c 12) gdb-multiarch $(DOCKER_FOLDER)/$(KERNEL_DEBUG_ELF) -ex "target remote localhost:1234"
 
+in_docker:
+	docker run -it -v $(shell pwd):$(DOCKER_FOLDER) -w $(DOCKER_FOLDER) $(DOCKER_IMAGE) /bin/bash
+
 # Clippy
 clippy:
 	@RUSTFLAGS="$(RUSTFLAGS_PEDANTIC)" $(CLIPPY_CMD)
@@ -126,7 +127,7 @@ clean:
 ##------------------------------------------------------------------------------
 readelf: $(KERNEL_ELF)
 	$(call color_header, "Launching readelf")
-	@$(DOCKER_TOOLS) $(READELF_BINARY) --headers $(KERNEL_ELF)
+	@$(DOCKER_TOOLS) $(READELF_BINARY) --headers target/$(TARGET)/release/$(BIN)
 
 ##------------------------------------------------------------------------------
 ## Run objdump
@@ -142,7 +143,7 @@ objdump: $(KERNEL_ELF)
 ##------------------------------------------------------------------------------
 nm: $(KERNEL_ELF)
 	$(call color_header, "Launching nm")
-	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_DEBUG_ELF) | sort | rustfilt
+	@$(DOCKER_TOOLS) $(NM_BINARY) --demangle --print-size $(KERNEL_ELF) | sort | rustfilt
 
 ##------------------------------------------------------------------------------
 ## Helpers for unit and integration test targets

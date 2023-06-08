@@ -1,8 +1,8 @@
 //! A heap implementation and any associated utilities
 
-use core::alloc::{AllocError, Allocator, Layout};
-use core::cell::RefCell;
-use core::marker::PhantomData;
+use crate::sync::SpinLock;
+use core::alloc::{AllocError, Allocator, GlobalAlloc, Layout};
+use core::ops::Deref;
 use core::{num::NonZeroUsize, ptr::NonNull};
 
 mod ordered_map;
@@ -30,23 +30,22 @@ const fn prev_power_of_2(n: NonZeroUsize) -> NonZeroUsize {
 }
 
 /// The backend for the buddy allocator. Allows the allocator to dynamically change size as needed
-trait AllocatorBackend {
+pub trait AllocatorBackend {
     /// Grows the allocator by the given region, starting at the given end pointer, in place
     ///
     /// Returns true if the resizing succeeds
-    fn grow(end: NonNull<()>, size: NonZeroUsize) -> bool;
+    fn grow(&mut self, end: NonNull<()>, size: NonZeroUsize) -> bool;
 }
 
 /// A buddy allocator
-struct BuddyAllocator<Backend: AllocatorBackend> {
+pub struct BuddyAllocator<Backend: AllocatorBackend> {
     /// The start of the region used by this allocator
     start: NonNull<()>,
     /// The current size of the region used by this allocator
     size: usize,
-    /// The map storing all free blocks for this allocator
-    free: RefCell<OrderedBuddyMap>,
-    #[expect(clippy::missing_docs_in_private_items, reason = "Phantom")]
-    _backend: PhantomData<Backend>,
+    /// The map storing all free blocks for this allocator, as well as the backend to expand the
+    /// heap
+    heap: SpinLock<(OrderedBuddyMap, Backend)>,
 }
 
 impl<Backend: AllocatorBackend> BuddyAllocator<Backend> {
@@ -58,7 +57,7 @@ impl<Backend: AllocatorBackend> BuddyAllocator<Backend> {
     ///
     /// * The range must be valid for reads and writes
     /// * The range must not be in use by anything else
-    pub unsafe fn new(start: NonNull<()>, end: NonNull<()>) -> Option<Self> {
+    pub unsafe fn new(start: NonNull<()>, end: NonNull<()>, backend: Backend) -> Option<Self> {
         // SAFETY: `start` and `end` are considered as the same allocated object
         unsafe { end.as_ptr().byte_offset_from(start.as_ptr()) }
             .try_into()
@@ -67,8 +66,7 @@ impl<Backend: AllocatorBackend> BuddyAllocator<Backend> {
                 start,
                 size,
                 // SAFETY: The caller guarantees that this range is suitable
-                free: RefCell::new(unsafe { OrderedBuddyMap::new(start, size) }),
-                _backend: PhantomData,
+                heap: SpinLock::new((unsafe { OrderedBuddyMap::new(start, size) }, backend)),
             })
     }
 }
@@ -90,7 +88,8 @@ unsafe impl<Backend: AllocatorBackend> Allocator for BuddyAllocator<Backend> {
                 return Err(AllocError {})
             };
 
-        let mut map = self.free.borrow_mut();
+        let mut heap = self.heap.lock();
+        let (map, backend) = &mut *heap;
         let mut result = map.pop(ilog2_u8(block_size));
         // If initial allocation fails, try to expand the heap and retry
         if result.is_none() {
@@ -104,7 +103,7 @@ unsafe impl<Backend: AllocatorBackend> Allocator for BuddyAllocator<Backend> {
             let heap_end_raw = unsafe { self.start.as_ptr().byte_add(self.size) };
             // SAFETY: This cannot be 0, assuming a proper backend implementation
             let heap_end = unsafe { NonNull::new_unchecked(heap_end_raw) };
-            result = if Backend::grow(
+            result = if backend.grow(
                 heap_end,
                 NonZeroUsize::new(self.size)
                     .map_or(MIN_GROW_SIZE, prev_power_of_2)
@@ -112,7 +111,7 @@ unsafe impl<Backend: AllocatorBackend> Allocator for BuddyAllocator<Backend> {
             ) {
                 // SAFETY: This region of memory was just given to use by the grower
                 unsafe { map.remove_buddy_or_insert_recursive(heap_end.cast(), ilog2_u8(size)) };
-                self.free.borrow_mut().pop(ilog2_u8(block_size))
+                map.pop(ilog2_u8(block_size))
             } else {
                 None
             };
@@ -133,9 +132,69 @@ unsafe impl<Backend: AllocatorBackend> Allocator for BuddyAllocator<Backend> {
 
         // SAFETY: The caller guarantees that the given block is appropriately allocated
         unsafe {
-            self.free
-                .borrow_mut()
+            self.heap
+                .lock()
+                .0
                 .remove_buddy_or_insert_recursive(ptr.cast(), ilog2_u8(block_size));
         };
     }
 }
+
+unsafe impl<Backend: AllocatorBackend> GlobalAlloc for BuddyAllocator<Backend> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.allocate(layout)
+            .map(NonNull::as_mut_ptr)
+            .unwrap_or(core::ptr::null_mut())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            self.deallocate(
+                NonNull::new(ptr).expect("Allocated pointers were never null"),
+                layout,
+            )
+        }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        self.allocate_zeroed(layout)
+            .map(NonNull::as_mut_ptr)
+            .unwrap_or(core::ptr::null_mut())
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
+        let pointer = NonNull::new(ptr).expect("Allocated pointers were never null");
+        if new_size < layout.size() {
+            unsafe { self.shrink(pointer, layout, new_layout) }
+        } else {
+            unsafe { self.grow(pointer, layout, new_layout) }
+        }
+        .map(NonNull::as_mut_ptr)
+        .unwrap_or(core::ptr::null_mut())
+    }
+}
+
+unsafe impl<Backend: AllocatorBackend> GlobalAlloc
+    for crate::cell::InitCell<BuddyAllocator<Backend>>
+{
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe { self.deref().alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { self.deref().dealloc(ptr, layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        unsafe { self.deref().alloc_zeroed(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        unsafe { self.deref().realloc(ptr, layout, new_size) }
+    }
+}
+
+// SAFETY: The spinlocks guarantee thread safety for the actual heap operations, and everything
+// else is constant after initialization.
+unsafe impl<Backend: AllocatorBackend> Sync for BuddyAllocator<Backend> {}
