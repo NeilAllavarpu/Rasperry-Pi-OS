@@ -1,8 +1,6 @@
 use crate::memory_layout::{FS_ELF, STACKS};
-use core::{
-    arch::asm,
-    ptr::{addr_of, addr_of_mut},
-};
+use core::arch::asm;
+use core::ptr::{addr_of, addr_of_mut};
 
 /// Number of cores
 const NUM_CORES: usize = 4;
@@ -81,14 +79,14 @@ unsafe extern "C" fn _per_core_start() -> ! {
 /// Should only be called once, in the boot process
 unsafe extern "C" fn start_rust() -> ! {
     const fn generate_descriptor(
-        target: usize,
+        target: u64,
         _readable: bool,
         writeable: bool,
         executable: bool,
     ) -> u64 {
         (1 << 54) // Unprivileged execute-never
             | (((!executable) as u64) << 53) // Privileged execute-never
-            | (target& !(PAGE_SIZE - 1)) as u64 // Phyiscal address
+            | (target & !(PAGE_SIZE as u64 - 1)) // Phyiscal address
             | (1 << 10) // Access flag
             | (0b11 << 8) // Shareability
             | (((!writeable) as u64) << 7) // Not writeable
@@ -97,7 +95,7 @@ unsafe extern "C" fn start_rust() -> ! {
 
     /// Maps the contiguous physical region starting at the given place to the given contiguous virtual address, of size given, with the specified attributes
     fn map_region_general(
-        physical_start: *const (),
+        physical_start: u64,
         virtual_start: *const (),
         size: usize,
         readable: bool,
@@ -107,7 +105,7 @@ unsafe extern "C" fn start_rust() -> ! {
         for offset in (0..=size).step_by(PAGE_SIZE) {
             #[allow(clippy::as_conversions)]
             let descriptor = generate_descriptor(
-                physical_start.addr() + offset,
+                physical_start + u64::try_from(offset).unwrap(),
                 readable,
                 writeable,
                 executable,
@@ -137,7 +135,7 @@ unsafe extern "C" fn start_rust() -> ! {
         executable: bool,
     ) {
         map_region_general(
-            region_start,
+            region_start.addr().try_into().unwrap(),
             // SAFETY: The virtual address is valid and should not overflow
             unsafe { region_start.byte_add(VIRTUAL_OFFSET) },
             // SAFETY: The range of the section should not overflow

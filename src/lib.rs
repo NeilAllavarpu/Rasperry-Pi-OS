@@ -30,6 +30,14 @@
     reason = "This is intentionally enabled"
 )]
 #![expect(clippy::implicit_return, reason = "This is the desired format")]
+#![expect(
+    clippy::inline_asm_x86_intel_syntax,
+    reason = "This is not targeted at x86"
+)]
+#![expect(
+    clippy::integer_division,
+    reason = "This is used with acceptable or intended rounding"
+)]
 #![expect(clippy::mod_module_files, reason = "This is the desired format")]
 #![expect(clippy::question_mark_used, reason = "This is the desired format")]
 #![expect(clippy::semicolon_inside_block, reason = "This is the desired format")]
@@ -49,12 +57,14 @@
 #![feature(generic_const_exprs)]
 #![feature(let_chains)]
 #![feature(lint_reasons)]
+#![feature(linkage)]
 #![feature(inline_const)]
 #![feature(int_roundings)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
 #![feature(slice_ptr_get)]
+#![feature(stdsimd)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]

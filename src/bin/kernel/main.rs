@@ -42,7 +42,9 @@ use stdos::os::vm::AddressSpace;
 mod boot;
 mod memory_layout;
 
-struct Backend {}
+use memory_layout::{FS_ELF, FS_TRANSLATION_TABLE};
+
+struct Backend;
 impl AllocatorBackend for Backend {
     fn grow(&mut self, _: NonNull<()>, _: NonZeroUsize) -> bool {
         false
@@ -61,12 +63,18 @@ extern "C" fn init(elf_size: usize) -> ! {
     static IS_INITIALIZING: AtomicBool = AtomicBool::new(true);
 
     if IS_FIRST.swap(false, Ordering::Relaxed) {
-        let entry = load_elf(
-            &mut unsafe { AddressSpace::<16, 25>::new(memory_layout::FS_TRANSLATION_TABLE.va) },
-            unsafe { NonNull::from_raw_parts(memory_layout::FS_ELF.va, elf_size).as_ref() },
-            memory_layout::FS_ELF.pa.addr().try_into().unwrap(),
+        let mut address_space = unsafe { AddressSpace::<16, 25>::new(FS_TRANSLATION_TABLE.va) };
+        let (entry, bss_start, bss_end) = load_elf(
+            &mut address_space,
+            unsafe { NonNull::from_raw_parts(FS_ELF.va, elf_size).as_ref() },
+            FS_ELF.pa.try_into().unwrap(),
         )
         .unwrap();
+
+        // SAFETY: Both addresses are aligned
+        unsafe {
+            address_space.map_range(0x1FF_0000, 0, 0x1_0000, true, false, false);
+        }
 
         IS_INITIALIZING.store(false, Ordering::Release);
 
@@ -75,8 +83,11 @@ extern "C" fn init(elf_size: usize) -> ! {
                 "msr ttbr0_el1, {}",
                 "isb sy",
                 "br {}",
-                in (reg) memory_layout::FS_TRANSLATION_TABLE.pa,
+                in (reg) FS_TRANSLATION_TABLE.pa,
                 in (reg) entry,
+                in ("x0") 0x1FF_4000_u64,
+                in ("x1") bss_start,
+                in ("x2") bss_end,
                 options(noreturn)
             );
         }

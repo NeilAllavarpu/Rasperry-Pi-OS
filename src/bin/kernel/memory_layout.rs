@@ -2,15 +2,15 @@ use core::num::NonZeroUsize;
 use core::ptr::NonNull;
 
 pub struct Mapping {
-    pub pa: *mut (),
+    pub pa: u64,
     pub va: NonNull<()>,
     pub size: NonZeroUsize,
 }
 
 impl Mapping {
-    const fn new(pa: usize, va: usize, size: usize) -> Self {
+    const fn new(pa: u64, va: usize, size: usize) -> Self {
         Self {
-            pa: pa as *mut (),
+            pa,
             va: NonNull::new((va | 0xFFFF_FFFF_FE00_0000) as *mut ()).unwrap(),
             size: NonZeroUsize::new(size).unwrap(),
         }

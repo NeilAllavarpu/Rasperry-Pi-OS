@@ -1,23 +1,9 @@
-use core::arch::asm;
+use core::arch::aarch64::{__sev, __wfe};
+use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::ptr::NonNull;
-use core::{
-    cell::UnsafeCell,
-    mem::MaybeUninit,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use core::sync::atomic::{AtomicBool, Ordering};
 
-fn wfe() {
-    unsafe {
-        asm!("wfe", options(nomem, nostack, preserves_flags));
-    }
-}
-
-fn sev() {
-    unsafe {
-        asm!("sev", options(nomem, nostack, preserves_flags));
-    }
-}
 /// A spinlock mutex
 pub struct SpinLock<T: ?Sized> {
     /// Whether or not the spinlock is taken
@@ -31,6 +17,7 @@ unsafe impl<T> Sync for SpinLock<T> {}
 
 impl<T> SpinLock<T> {
     /// Creates a spinlock around the given data
+    #[inline]
     pub const fn new(data: T) -> Self {
         Self {
             data: UnsafeCell::new(data),
@@ -38,44 +25,53 @@ impl<T> SpinLock<T> {
         }
     }
 
+    /// Locks the mutex. The mutex is automatically unlocked when the returned `MutexGuard` is
+    /// dropped
+    #[inline]
     pub fn lock(&self) -> MutexGuard<T> {
         while self.is_locked.swap(true, Ordering::Acquire) {
-            core::hint::spin_loop();
+            while self.is_locked.load(Ordering::Relaxed) {
+                #[cfg(target_arch = "aarch64")]
+                // SAFETY: This only compiles for `aarch64` targets
+                unsafe {
+                    __wfe();
+                };
+            }
         }
 
-        unsafe { MutexGuard::new(self) }
+        MutexGuard(self)
     }
 
-    unsafe fn unlock(&self) {
-        debug_assert!(self.is_locked.swap(false, Ordering::Release));
-    }
-}
-
-pub struct MutexGuard<'a, T> {
-    parent: &'a SpinLock<T>,
-}
-
-impl<'a, T> MutexGuard<'a, T> {
-    /// Creates a new MutexGuard for the *locked* spinlock
+    /// Unlocks the mutex
     ///
     /// # Safety
     ///
-    /// The spinlock must be locked for the duration of this `MutexGuard` to guarantee we have
-    /// exclusive access to the data inside
-    const unsafe fn new(parent: &'a SpinLock<T>) -> Self {
-        Self { parent }
-    }
-
-    /// Returns a pointer to the spinlock's data
-    fn get_pointer(&self) -> NonNull<T> {
-        // SAFETY: pointers to `data` are nonnull
-        unsafe { NonNull::new_unchecked(self.parent.data.get()) }
+    /// This must only be called by the destructor of the `MutexGuard` that locked this mutex
+    #[inline]
+    unsafe fn unlock(&self) {
+        self.is_locked.store(false, Ordering::Release);
+        #[cfg(target_arch = "aarch64")]
+        // SAFETY: This only compiles for `aarch64` targets
+        unsafe {
+            __sev();
+        }
     }
 }
 
-impl<'a, T> Deref for MutexGuard<'a, T> {
+pub struct MutexGuard<'locked, T>(&'locked SpinLock<T>);
+
+impl<'locked, T> MutexGuard<'locked, T> {
+    /// Returns a pointer to the spinlock's data
+    const fn get_pointer(&self) -> NonNull<T> {
+        // SAFETY: pointers to `data` are nonnull
+        unsafe { NonNull::new_unchecked(self.0.data.get()) }
+    }
+}
+
+impl<'locked, T> Deref for MutexGuard<'locked, T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         // SAFETY: Since the lock has been acquired, we have exclusive mutable access to the
         // interior
@@ -83,7 +79,8 @@ impl<'a, T> Deref for MutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> DerefMut for MutexGuard<'a, T> {
+impl<'locked, T> DerefMut for MutexGuard<'locked, T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: Since the lock has been acquired, we have exclusive mutable access to the
         // interior
@@ -91,10 +88,13 @@ impl<'a, T> DerefMut for MutexGuard<'a, T> {
     }
 }
 
-impl<'a, T> Drop for MutexGuard<'a, T> {
+impl<'locked, T> Drop for MutexGuard<'locked, T> {
+    #[inline]
     fn drop(&mut self) {
+        // SAFETY: We trust the creator of this guard to do so only for proper locking, and so this
+        // is the correct time to unlock the mutex
         unsafe {
-            self.parent.unlock();
+            self.0.unlock();
         }
     }
 }

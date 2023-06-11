@@ -1,3 +1,5 @@
+use crate::os::InitCell;
+use crate::sync::SpinLock;
 use bitfield_struct::bitfield;
 use core::ptr::NonNull;
 use num_derive::{FromPrimitive, ToPrimitive};
@@ -239,3 +241,5 @@ where
         }
     }
 }
+
+pub static ADDRESS_SPACE: InitCell<SpinLock<AddressSpace<16, 25>>> = InitCell::new();

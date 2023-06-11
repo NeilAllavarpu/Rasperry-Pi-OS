@@ -139,7 +139,7 @@ pub fn load_elf<const PAGE_BITS: u8, const ADDRESS_BITS: u8>(
     address_space: &mut AddressSpace<PAGE_BITS, ADDRESS_BITS>,
     elf: &[u8],
     elf_pa: u64,
-) -> Option<u64>
+) -> Option<(u64, u64, u64)>
 where
     [(); 1 << (ADDRESS_BITS - PAGE_BITS)]: Sized,
 {
@@ -173,6 +173,9 @@ where
     if usize::try_from(header.program_header_entry_size).ok()? != mem::size_of::<ProgramHeader>() {
         return None;
     }
+
+    let mut bss_start = None;
+    let mut bss_end = None;
 
     match FromPrimitive::from_u8(header.bit_version)? {
         BitVersion::Bit32 => todo!("Implement 32-bit ELF loading"),
@@ -219,7 +222,7 @@ where
                             PAGE_BITS,
                         );
                         match header.filesz.cmp(&header.memsz) {
-                            Ordering::Equal => {
+                            Ordering::Equal | Ordering::Less => {
                                 let physical_start =
                                     elf_pa.checked_add(header.offset)? & !page_mask;
                                 // SAFETY: The physical and virtual starts are properly aligned by masking
@@ -233,10 +236,29 @@ where
                                         false,
                                     );
                                 }
+                                if header.memsz > header.filesz {
+                                    assert!(bss_start.is_none());
+                                    assert!(bss_end.is_none());
+                                    bss_start = Some(header.va + header.filesz);
+                                    bss_end = Some(header.va + header.memsz);
+                                }
                             }
-                            Ordering::Less => {
-                                todo!("Handle filesz < memsz");
-                            }
+                            /*Ordering::Less => {
+                                let virtual_range = page_round_up(
+                                    header.va + header.memsz - virtual_start,
+                                    PAGE_BITS,
+                                );
+                                if virtual_range == virtual_backed_range {
+                                    let new_frame = (0x2_0000 as *mut ());
+                                    elf.get_mut(
+                                        usize::try_from(header.offset + header.filesz).ok()?
+                                            ..usize::try_from(header.offset + header.memsz).ok()?,
+                                    )?
+                                    .fill(0);
+                                } else {
+                                    todo!("Handle filesz < memsz");
+                                }
+                            }*/
                             Ordering::Greater => {
                                 // Invalid ELF - memsz shouldn't be smaller than filesz
                                 return None;
@@ -247,7 +269,7 @@ where
                 }
             }
 
-            header.entry.try_into().ok()
+            Some((header.entry, bss_start.unwrap_or(0), bss_end.unwrap_or(0)))
         }
     }
 }
