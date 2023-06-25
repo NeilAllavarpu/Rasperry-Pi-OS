@@ -174,7 +174,10 @@ impl OrderedBuddyMap {
                 || (next.log_size == log_size && next_ptr.as_ptr() > buddy)
             {
                 // Went past the buddy; insert this block and end, since there is no more merging possible
-                node_ref.next = next_ptr;
+                *node_ref = Block {
+                    next: next_ptr,
+                    log_size,
+                };
                 prev.next = node;
                 break;
             } else {
@@ -243,26 +246,30 @@ impl OrderedBuddyMap {
                 log_size: u8::MIN,
                 next: (&TAIL).into(),
             },
-        };
-        if let Some(next_block_addr) = round_up_power_of_2::<LOG_MIN_SIZE>(start.addr()) {
-            let next_block = start.with_addr(next_block_addr);
-            size =
-            // SAFETY: `next_block_addr >= start.addr()`
-            size.saturating_sub(unsafe { next_block_addr.get().unchecked_sub(start.addr().get()) });
+        }; /*
+           if let Some(next_block_addr) = round_up_power_of_2::<LOG_MIN_SIZE>(start.addr()) {
+               let mut next_block = start.with_addr(next_block_addr);
+               size =
+               // SAFETY: `next_block_addr >= start.addr()`
+               size.saturating_sub(unsafe { next_block_addr.get().unchecked_sub(start.addr().get()) });
 
-            while let Some(nonzero_size) = NonZeroUsize::new(size) {
-                let capacity = prev_power_of_2(nonzero_size);
-                let alignment = largest_factor_power_of_2(next_block.addr());
-                let block_size = capacity.min(alignment);
-                if block_size < MIN_SIZE {
-                    break;
-                }
-                // SAFETY: We correctly formed this block from the region given to us by the caller
-                unsafe {
-                    map.remove_buddy_or_insert_recursive(next_block, ilog2_u8(block_size));
-                }
-            }
-        }
+               while let Some(nonzero_size) = NonZeroUsize::new(size) {
+                   let capacity = prev_power_of_2(nonzero_size);
+                   let alignment = largest_factor_power_of_2(next_block.addr());
+                   let block_size = capacity.min(alignment);
+                   if block_size < MIN_SIZE {
+                       break;
+                   }
+                   // SAFETY: We correctly formed this block from the region given to us by the caller
+                   unsafe {
+                       map.remove_buddy_or_insert_recursive(next_block, ilog2_u8(block_size));
+                   };
+
+                   next_block =
+                       next_block.map_addr(|old| unsafe { old.unchecked_add(block_size.into()) });
+                   size = unsafe { size.unchecked_sub(block_size.into()) };
+               }
+           }*/
         map
     }
 }

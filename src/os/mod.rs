@@ -1,3 +1,4 @@
+mod exception;
 pub mod syscalls;
 pub mod vm;
 
@@ -62,12 +63,12 @@ extern "C" fn _start(ttbr0_virtual: *mut ()) -> ! {
     }
 }
 
-extern "C" {
-    fn main();
-}
-
 /// Performs initialization functions, and then hands off execution to `main`
 extern "C" fn wrapper(ttbr0_virtual: *mut ()) -> ! {
+    extern "C" {
+        fn main();
+    }
+
     /// Page size, in bytes
     const PAGE_SIZE: usize = 1 << 16;
     assert!(

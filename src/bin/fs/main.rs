@@ -7,17 +7,36 @@
 #![feature(format_args_nl)]
 #![feature(stdsimd)]
 #![feature(panic_info_message)]
+#![feature(lint_reasons)]
+#![feature(int_roundings)]
 
 use stdos::os::vm::ADDRESS_SPACE;
+
+mod emmc;
+//use emmc::Emmc;
+
+const EMMC_VA: usize = 0x2_0000;
+const EMMC_PA: u64 = 0x3F30_0000;
 
 #[no_mangle]
 extern "C" fn main() {
     unsafe {
-        ADDRESS_SPACE
-            .lock()
-            .map_range(0x1_0000, 0x3F20_0000, 0x1_0000, true, false, true);
+        let mut x = ADDRESS_SPACE.lock();
+        x.map_range(0x1_0000, 0x3F20_0000, 0x1_0000, true, false, true);
+        x.map_range(
+            EMMC_VA.try_into().unwrap(),
+            EMMC_PA,
+            0x1_0000,
+            true,
+            false,
+            true,
+        );
         core::arch::asm!("dsb OSHST", "isb");
-    };
+    }; /*
+       let mut emmc = Emmc::new(EMMC_VA);
+       emmc.init();
+       let mut buf = [0xFF_u8; 512];
+       emmc.read_blk(0, &mut buf);*/
     println!("Hello world");
 }
 
@@ -62,6 +81,7 @@ macro_rules! println {
 /// then shutdown
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
+    use qemu_exit::QEMUExit;
     let (file, line, column) = match info.location() {
         Some(loc) => (loc.file(), loc.line(), loc.column()),
         _ => ("Unknown file", 0, 0),
@@ -75,7 +95,5 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         info.message().unwrap_or(&format_args!("")),
     );
 
-    loop {
-        unsafe { core::arch::aarch64::__wfi() }
-    }
+    qemu_exit::AArch64::new().exit(0);
 }

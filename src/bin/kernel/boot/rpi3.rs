@@ -1,9 +1,15 @@
 use crate::memory_layout::{FS_ELF, STACKS};
-use core::arch::asm;
-use core::ptr::{addr_of, addr_of_mut};
+use core::arch::aarch64::ISHST;
+use core::arch::{aarch64, asm};
+use core::cell::{SyncUnsafeCell, UnsafeCell};
+use core::mem::MaybeUninit;
+use core::num::NonZeroUsize;
+use core::ptr::{self, addr_of, addr_of_mut};
+use core::sync::atomic::{self, AtomicPtr, AtomicU16, AtomicUsize};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Number of cores
-const NUM_CORES: usize = 4;
+pub const NUM_CORES: usize = 4;
 
 /// Physical address that the kernel is loaded to
 const PHYSICAL_LOAD_ADDR: usize = 0x8_0000;
@@ -13,9 +19,8 @@ const VIRTUAL_LOAD_ADDR: usize = 0xFFFF_FFFF_FE00_0000;
 const VIRTUAL_OFFSET: usize = VIRTUAL_LOAD_ADDR - PHYSICAL_LOAD_ADDR;
 
 const PAGE_SIZE: usize = 64 * 1024;
-#[allow(clippy::as_conversions)]
-const PAGE_SIZE_BITS: u8 = PAGE_SIZE.ilog2() as u8;
-const ADDRESS_BITS: u8 = 25;
+const PAGE_SIZE_BITS: u32 = PAGE_SIZE.ilog2();
+const ADDRESS_BITS: u32 = 25;
 const VIRTUAL_BASE: usize = 0xFFFF_FFFF_FE00_0000;
 
 #[repr(C)]
@@ -23,6 +28,9 @@ const VIRTUAL_BASE: usize = 0xFFFF_FFFF_FE00_0000;
 #[allow(clippy::as_conversions)]
 pub(crate) struct TranslationTable([u64; 1 << (ADDRESS_BITS - PAGE_SIZE_BITS) as usize]);
 pub(crate) static mut TRANSLATION_TABLE: TranslationTable = TranslationTable([0; _]);
+
+static CORE_COUNT: AtomicU16 = AtomicU16::new(1);
+static mut STACK_SIZE: MaybeUninit<usize> = MaybeUninit::uninit();
 
 /// The entry point of the kernel
 /// * Clears the BSS
@@ -32,17 +40,16 @@ pub(crate) static mut TRANSLATION_TABLE: TranslationTable = TranslationTable([0;
 /// Should never be called manually, only by the bootloader
 #[no_mangle]
 #[naked]
-#[link_section = ".text._start"]
+#[link_section = ".init"]
 unsafe extern "C" fn _start() -> ! {
     // SAFETY: We need to use this assembly to set a stack pointer
     unsafe {
         asm!(
             "msr DAIFSET, #0b1111", // First, disable interrupts
-            // Since this is core 0, give it a stack corresponding to the 0th physical (kernel-sized) page
-            "mov sp, {STACK_START}",
+            "adr x0, __bss_end",
+            "add sp, x0, #0x800",
             "b {start_rust}", // Perform the main initialization; this should never return
-            STACK_START = const STACKS.size.get(),
-            start_rust  = sym start_rust,
+            start_rust = sym start_rust,
             options(noreturn)
         )
     }
@@ -61,16 +68,94 @@ unsafe extern "C" fn _per_core_start() -> ! {
     unsafe {
         asm!(
             "msr DAIFSET, #0b1111", // First, disable interrupts
-            "mrs x0, MPIDR_EL1", // Load the core ID into the other
-            "and x0, x0, #0b11", // Mask out higher bits
-            "lsl x0, x0, {STACK_SIZE_BITS}", // Scale the index by the page size
-            "mov sp, x0", // Set the sp
+            "adr x0, {COUNTER}",    // Atomically increment the core counter
+            "0: ldxrh w1, [x0]",    // The desired index (ID + 1) is held in `w1`
+            "add w1, w1, #1",
+            "stxrh w2, w1, [x0]",
+            "cbnz w2, 0b",
+            "ldr x0, {STACK_SIZE}", // Load the configured stack size
+            "adr x2, __bss_end",    // Load the offset of the stacks, in physical memory
+            "add x2, x2, #15",      // Round the offset up to the nearest multiple of 16, for
+                                    // alignment
+            "and x2, x2, #{ALIGN_MASK}",
+            "madd x0, x0, x1, x2",  // Compute the top of this core's stack
+            "mov sp, x0",           // Set the sp
             "b {per_core_start_rust}", // Perform the remaining initialization; this should never return
-            STACK_SIZE_BITS = const ((STACKS.size.get() / NUM_CORES).ilog2()),
+           STACK_SIZE = sym STACK_SIZE,
+            COUNTER = sym CORE_COUNT,
             per_core_start_rust = sym per_core_start_rust,
+            ALIGN_MASK = const !0xF_u64,
             options(noreturn)
         )
     }
+}
+
+const fn generate_descriptor(
+    target: u64,
+    _readable: bool,
+    writeable: bool,
+    executable: bool,
+) -> u64 {
+    (1 << 54) // Unprivileged execute-never
+        | (((!executable) as u64) << 53) // Privileged execute-never
+        | (target & !(PAGE_SIZE as u64 - 1)) // Phyiscal address
+        | (1 << 10) // Access flag
+        | (0b11 << 8) // Shareability
+        | (((!writeable) as u64) << 7) // Not writeable
+        | 0b11 // Valid entry
+}
+
+/// Maps the contiguous physical region starting at the given place to the given contiguous virtual address, of size given, with the specified attributes
+fn map_region_general(
+    physical_start: u64,
+    virtual_start: *const (),
+    size: usize,
+    readable: bool,
+    writeable: bool,
+    executable: bool,
+) {
+    for offset in (0..=size).step_by(PAGE_SIZE) {
+        #[allow(clippy::as_conversions)]
+        let descriptor = generate_descriptor(
+            physical_start + u64::try_from(offset).unwrap(),
+            readable,
+            writeable,
+            executable,
+        );
+        unsafe {
+            *TRANSLATION_TABLE
+                .0
+                .get_mut(
+                    virtual_start
+                        .mask(!(PAGE_SIZE - 1))
+                        .byte_sub(VIRTUAL_BASE)
+                        .byte_add(offset)
+                        .addr()
+                        / PAGE_SIZE,
+                )
+                .unwrap() = descriptor;
+        }
+    }
+}
+
+/// Maps the given physical region to the virtual addresses shifted up by `VIRTUAL_OFFSET`
+fn map_region(
+    region_start: *const (),
+    region_end: *const (),
+    readable: bool,
+    writeable: bool,
+    executable: bool,
+) {
+    map_region_general(
+        region_start.addr().try_into().unwrap(),
+        // SAFETY: The virtual address is valid and should not overflow
+        unsafe { region_start.byte_add(VIRTUAL_OFFSET) },
+        // SAFETY: The range of the section should not overflow
+        unsafe { region_end.byte_offset_from(region_start) }.unsigned_abs(),
+        readable,
+        writeable,
+        executable,
+    );
 }
 
 /// The (almost) initial boot code for the kernel;
@@ -78,172 +163,122 @@ unsafe extern "C" fn _per_core_start() -> ! {
 /// # Safety
 /// Should only be called once, in the boot process
 unsafe extern "C" fn start_rust() -> ! {
-    const fn generate_descriptor(
-        target: u64,
-        _readable: bool,
-        writeable: bool,
-        executable: bool,
-    ) -> u64 {
-        (1 << 54) // Unprivileged execute-never
-            | (((!executable) as u64) << 53) // Privileged execute-never
-            | (target & !(PAGE_SIZE as u64 - 1)) // Phyiscal address
-            | (1 << 10) // Access flag
-            | (0b11 << 8) // Shareability
-            | (((!writeable) as u64) << 7) // Not writeable
-            | 0b11 // Valid entry
-    }
-
-    /// Maps the contiguous physical region starting at the given place to the given contiguous virtual address, of size given, with the specified attributes
-    fn map_region_general(
-        physical_start: u64,
-        virtual_start: *const (),
-        size: usize,
-        readable: bool,
-        writeable: bool,
-        executable: bool,
-    ) {
-        for offset in (0..=size).step_by(PAGE_SIZE) {
-            #[allow(clippy::as_conversions)]
-            let descriptor = generate_descriptor(
-                physical_start + u64::try_from(offset).unwrap(),
-                readable,
-                writeable,
-                executable,
-            );
-            unsafe {
-                *TRANSLATION_TABLE
-                    .0
-                    .get_mut(
-                        virtual_start
-                            .mask(!(PAGE_SIZE - 1))
-                            .byte_sub(VIRTUAL_BASE)
-                            .byte_add(offset)
-                            .addr()
-                            / PAGE_SIZE,
-                    )
-                    .unwrap() = descriptor;
-            }
-        }
-    }
-
-    /// Maps the given physical region to the virtual addresses shifted up by `VIRTUAL_OFFSET`
-    fn map_region(
-        region_start: *const (),
-        region_end: *const (),
-        readable: bool,
-        writeable: bool,
-        executable: bool,
-    ) {
-        map_region_general(
-            region_start.addr().try_into().unwrap(),
-            // SAFETY: The virtual address is valid and should not overflow
-            unsafe { region_start.byte_add(VIRTUAL_OFFSET) },
-            // SAFETY: The range of the section should not overflow
-            unsafe { region_end.byte_offset_from(region_start) }.unsigned_abs(),
-            readable,
-            writeable,
-            executable,
-        );
-    }
-
     extern "Rust" {
         static __text_start: ();
-        static __text_end: ();
-        static __rodata_start: ();
-        static __rodata_end: ();
-        static __data_start: ();
-        static __data_end: u32;
+        static __elf_start: u32;
         static mut __bss_start: u8;
         static __bss_end: u8;
     }
 
     /// Addresses to write to, in order to wake up the other cores
-    #[allow(clippy::as_conversions)]
-    const WAKE_CORE_ADDRS: [*mut unsafe extern "C" fn() -> !; 3] =
-        [0xE0 as *mut _, 0xE8 as *mut _, 0xF0 as *mut _];
+    const WAKE_CORE_ADDRS: [usize; 3] = [0xE0, 0xE8, 0xF0];
 
-    // Copy the file system ELF to a page-aligned location
-    let fs_elf_size = unsafe { addr_of!(__data_end).read_unaligned() }
-        .try_into()
-        .unwrap();
+    // TODO: compute this somehow
+    let stack_size = 0x1000;
+    // SAFETY: This is the only currently running code, so no other accesses to this static exist
     unsafe {
-        (FS_ELF.pa as *mut u8)
-            .copy_from_nonoverlapping(addr_of!(__data_end).byte_add(4).cast(), fs_elf_size);
+        STACK_SIZE.write(stack_size);
     }
 
-    // SAFETY: This is the initialization sequence, and so the BSS is not being
-    // used yet. We need to zero it out beforehand.
+    // SAFETY: Taking the address of a static is always safe
+    let bss_start_addr = unsafe { addr_of_mut!(__bss_start) };
+
+    // Figure out the size of ELF in memory
+    // SAFETY: The build system should place a u32 indicating the size of the FS elf
+    let fs_elf_size = unsafe { ptr::addr_of!(__elf_start).read_unaligned() }.try_into();
+    // SAFETY: `usize` is 64-bit, so a `u32` always fits.
+    let fs_elf_size = unsafe { fs_elf_size.unwrap_unchecked() };
+
+    // SAFETY: No one else can be accessing statics at this time
     unsafe {
-        addr_of_mut!(__bss_start).write_bytes(
-            0,
-            addr_of!(__bss_end)
-                .offset_from(addr_of!(__bss_start))
-                .unsigned_abs(),
-        );
+        FS_ELF.size = #[expect(
+            clippy::expect_used,
+            reason = "Panics are the only possible error handling at this point"
+        )]
+        NonZeroUsize::new(fs_elf_size)
+            .expect("File system ELF should have nonzero size");
     }
 
-    // Map UART
-    // This is temporary for debug purposes in the kernel
+    // SAFETY:
+    // * These pointers represent the start and end of the BSS
+    // * These pointers are aligned to 16 bytes, so their difference is a multiple of 16 bytes
+    // * The difference cannot overflow an `isize` since it fits into a 25 bit address space
+    // * The difference does not involve any wrapping around
+    let bss_size = unsafe { addr_of!(__bss_end).offset_from(bss_start_addr) }.unsigned_abs();
+    // SAFETY: The BSS is valid for writes, and the start is aligned to 16 bytes as per the linker
+    // script
     unsafe {
-        *TRANSLATION_TABLE.0.last_mut().unwrap() =
-            generate_descriptor(0x3F20_0000, true, true, false) | (1 << 2);
-    }
+        bss_start_addr.write_bytes(0, bss_size);
+    };
+
+    map_region_general(
+        0x3F20_0000,
+        0xFFFF_FFFF_FF00_0000 as *const (),
+        0x2000,
+        true,
+        true,
+        false,
+    );
 
     // Map the kernel
     map_region(
-        addr_of!(__rodata_start),
-        addr_of!(__rodata_end),
-        true,
-        false,
-        false,
-    );
-    map_region(
         addr_of!(__text_start),
-        addr_of!(__text_end),
-        true,
-        false,
-        true,
-    );
-    map_region(
-        addr_of!(__data_start),
         addr_of!(__bss_end).cast(),
         true,
         true,
         true,
     );
-    map_region_general(
-        STACKS.pa,
-        STACKS.va.as_ptr(),
-        STACKS.size.into(),
-        true,
-        true,
-        false,
-    );
 
     map_region_general(
-        FS_ELF.pa,
-        FS_ELF.va.as_ptr(),
+        unsafe { FS_ELF.pa },
+        unsafe { FS_ELF.va }.as_ptr(),
         fs_elf_size,
         true,
-        false,
+        true,
         false,
     );
 
+    // Make sure translation table + other globals are written before setting wakeup addresses
+    // SAFETY: Data memory barriers are defined on the Raspberry Pi
+    unsafe {
+        aarch64::__dmb(ISHST);
+    };
+
     // Wake up other cores
+
     for addr in WAKE_CORE_ADDRS {
-        // SAFETY: These are currently valid addresses to write to in order to wake the other cores
-        unsafe {
-            *addr = _per_core_start;
-        }
+        /*#[expect(
+            clippy::as_conversions,
+            reason = "Unable to cast a function pointer to a pointer or usize otherwise"
+        )]
+        #[expect(
+            clippy::fn_to_numeric_cast_any,
+            reason = "Intentional function pointer cast"
+        )]*/
+        // SAFETY: These are currently valid addresses to write to in order to wake the other
+        // cores. and are properly aligned + unaccessed to otherwise
+        // unsafe { AtomicUsize::from_ptr(ptr::from_exposed_addr_mut(addr)) }
+        //   .store(_per_core_start as usize, Ordering::Relaxed);
     }
 
     // Ensure all writes complete before waking up the other cores
+    // SAFETY: Data synchronization barriers are defined on the Raspberry Pi
     unsafe {
-        asm!("dsb ISHST", "sev", options(nomem, nostack, preserves_flags));
+        aarch64::__dsb(ISHST);
     }
+
+    // SAFETY: SEV is defined on the Raspberry Pi
+    unsafe {
+        // aarch64::__sev();
+    }
+
     // SAFETY: This is the first and only time the per-core-init will be called on this core
     unsafe {
-        per_core_start_rust(fs_elf_size, STACKS.size.get());
+        per_core_start_rust(
+            addr_of!(__bss_end)
+                .map_addr(|addr| addr.saturating_add(stack_size))
+                .addr(),
+        );
     }
 }
 
@@ -254,9 +289,9 @@ unsafe extern "C" fn start_rust() -> ! {
 /// # Safety
 /// Should only be called once per core in the boot process
 #[allow(clippy::as_conversions)]
-unsafe extern "C" fn per_core_start_rust(elf_size: usize, sp_offset: usize) -> ! {
+unsafe extern "C" fn per_core_start_rust(sp_physical: usize) -> ! {
     // Set the stack pointer in EL1 to be the top of the given page
-    let sp_el1 = STACKS.va.addr().get() + sp_offset;
+    let sp_el1 = VIRTUAL_OFFSET + sp_physical;
 
     // Disable EL2 controls
     const HCR_EL2: u64 = (1 << 56) // Allow allocation tag access
@@ -296,13 +331,13 @@ unsafe extern "C" fn per_core_start_rust(elf_size: usize, sp_offset: usize) -> !
 ;
     const MAIR_EL1: u64 = 0xFF; // Attribute for normal memory
     #[allow(clippy::as_conversions)]
-    let ttbr1_el1: u64 = addr_of!(TRANSLATION_TABLE) as u64 | 1; // Enable common translations
+    let ttbr1_el1 = addr_of!(TRANSLATION_TABLE).addr() | 1; // Enable common translations
     const SCTLR_EL1: u64 = (1 << 60) // Disable trapping TPIDR2 accesses
-                           | (0x1F << 52) // Disable trapping various memory operations
-                    | (0b11 << 42) // Allow allocation tags
-                    | (1 << 33) // Allow memory copy & set instructions
-                    | (1 << 32) // Disable cache operations at EL0 if no write permissions
-                    | (1 << 28) // Do not trap device accessess at EL0
+                            | (0x1F << 52) // Disable trapping various memory operations
+                            | (0b11 << 42) // Allow allocation tags
+                            | (1 << 33) // Allow memory copy & set instructions
+                            | (1 << 32) // Disable cache operations at EL0 if no write permissions
+                            | (1 << 28) // Do not trap device accessess at EL0
                             | (1 << 26) // Do not trap EL0 cache operations
                             | (1 << 22) // EL1 exceptions are context synchronizing
                             | (0b101 << 16) // Do not trap WFE/WFI
@@ -350,7 +385,6 @@ unsafe extern "C" fn per_core_start_rust(elf_size: usize, sp_offset: usize) -> !
             in(reg) SCTLR_EL1,
             in(reg) sp_el1,
             in(reg) SPSR_EL2,
-            in("x0") elf_size,
             options(nomem, nostack, noreturn)
         )
     }

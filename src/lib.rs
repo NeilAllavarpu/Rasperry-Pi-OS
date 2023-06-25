@@ -61,6 +61,7 @@
 #![feature(inline_const)]
 #![feature(int_roundings)]
 #![feature(naked_functions)]
+#![feature(nonzero_ops)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
 #![feature(slice_ptr_get)]

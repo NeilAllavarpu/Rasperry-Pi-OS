@@ -1,4 +1,4 @@
-.vscode
+.DS_Store
 target
 Cargo.lock
 kernel8.img
