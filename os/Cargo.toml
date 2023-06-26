@@ -1,0 +1,29 @@
+[package]
+name = "os"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitfield-struct = "0.4.4"
+derive_more = "0.99.17"
+num-derive = "0.3.3"
+qemu-exit = "3.0.1"
+tock-registers = "0.8.1"
+
+[dependencies.num-traits]
+version = "0.2.15"
+default-features = false
+
+[lib]
+name = "stdos"
+plugin = false
+proc-macro = false
+test = false
+
+[[bin]]
+name = "kernel"
+test = false
+
+[[bin]]
+name = "fs"
+test = false

@@ -21,7 +21,7 @@ fn main() -> Result<(), String> {
         "cargo:rustc-link-arg-bin=kernel=--script={}/{}",
         path, PATH_TO_LINKER_SCRIPT
     );
-    // Disable section alignment and read-only segments
+    // Disable section alignment
     println!("cargo:rustc-link-arg-bin=kernel=-n");
     // Produce a raw, stripped binary instead of an ELF, only for non-debugmode
     // In debug mode, we need the ELF to contain symbols
@@ -35,6 +35,7 @@ fn main() -> Result<(), String> {
     {
         "false" => {
             println!("cargo:rustc-link-arg-bin=kernel=--oformat=binary");
+            println!("cargo:rustc-link-arg=--strip-all");
         }
         "true" => {}
         _ => unreachable!(),

@@ -1,16 +1,2 @@
-[build]
-target = "aarch64-unknown-none-softfloat"
-rustflags = [
-  "-Ccode-model=tiny",
-  "-Clink-args=-O3 --optimize-bb-jumps --strip-all --gc-sections",
-  "-Ctarget-cpu=cortex-a53",
-  "-Cforce-frame-pointers=false",
-  "-Cforce-unwind-tables=false",
-  "-Clinker-plugin-lto=true",
-  "-Zunstable-options",
-  "-Csplit-debuginfo=packed"
-]
-
-[unstable]
-build-std = ["core", "alloc"]
-profile-rustflags = true
+[alias]
+xtask = "run --package xtask --release --"
