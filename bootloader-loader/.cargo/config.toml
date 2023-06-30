@@ -1,0 +1,23 @@
+[build]
+target = "aarch64-unknown-none"
+rustflags = [
+  "-Ccode-model=tiny",
+  "-Clink-args=-O3 --optimize-bb-jumps --strip-all --oformat=binary --script=bootloader-loader/src/linker.ld",
+  "-Ctarget-cpu=cortex-a72",
+  "-Cforce-frame-pointers=false",
+  "-Cforce-unwind-tables=false",
+  "-Clinker-plugin-lto=true",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["panic_immediate_abort"]

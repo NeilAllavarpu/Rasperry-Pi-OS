@@ -1,6 +1,3 @@
 .DS_Store
-target
-Cargo.lock
-kernel8.img
-kernel8_debug.img
-.gdb_history
+**/target
+**/Cargo.lock
