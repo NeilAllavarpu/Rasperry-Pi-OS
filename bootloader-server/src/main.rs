@@ -33,11 +33,15 @@ use clap::Parser;
 use core::slice;
 use core::time::Duration;
 use serialport::SerialPortType;
-use serialport::{DataBits, FlowControl, Parity, StopBits};
+use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
 
 use std::error::Error;
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
+
+/// The default baud rate when opening a connection; is clamped to the maximum rate passed as an
+/// argument
+const DEFAULT_BAUD_RATE: u32 = 115_200;
 
 /// Arguments to control the server conection and operations
 #[derive(Parser, Debug)]
@@ -50,6 +54,10 @@ struct Args {
     /// Kernel to load; if not given, kernel loading support is disabled
     #[arg(short, long)]
     kernel: Option<String>,
+
+    /// Maximum baud rate to use over the connection
+    #[arg(short, long, default_value_t = DEFAULT_BAUD_RATE)]
+    max_baud: u32,
 }
 
 /// Reads a single byte from the given reader. See `Read::read` for more information on error
@@ -57,7 +65,7 @@ struct Args {
 ///
 /// Additionally, returns an `Error` of kind `UnexpectedEof` if the `read` operation returns 0
 /// bytes
-fn read_byte<R: Read>(reader: &mut R) -> io::Result<u8> {
+fn read_byte(reader: &mut impl Read) -> io::Result<u8> {
     let mut byte = 0_u8;
     reader.read(slice::from_mut(&mut byte)).and_then(|written| {
         if written == 0 {
@@ -66,6 +74,27 @@ fn read_byte<R: Read>(reader: &mut R) -> io::Result<u8> {
             Ok(byte)
         }
     })
+}
+
+/// Reads a little-endian `u32` over the connection.
+///
+/// Propogates any errors from reading the connection
+fn read_u32(reader: &mut impl Read) -> io::Result<u32> {
+    let mut bytes = [0; 4];
+    reader.read_exact(&mut bytes)?;
+    Ok(u32::from_le_bytes(bytes))
+}
+
+/// Checks for an OK signal over the connection.
+///
+/// Propogates any errors from reading the connection
+fn check_ok(reader: &mut impl Read) -> io::Result<()> {
+    #[allow(clippy::print_stderr)]
+    match read_byte(reader)? {
+        0 => eprintln!("[LOG] Operation successful!"),
+        err => eprintln!("[WARN] Did not receive acknowledgement of operation, error code {err}"),
+    }
+    Ok(())
 }
 
 #[allow(clippy::print_stdout)]
@@ -104,7 +133,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let mut uart = serialport::new(port_name, 115_200)
+    let mut uart = serialport::new(port_name, DEFAULT_BAUD_RATE.min(args.max_baud))
         .data_bits(DataBits::Eight)
         .flow_control(FlowControl::None)
         .parity(Parity::None)
@@ -120,8 +149,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     0 => {
                         eprintln!("[LOG] Kernel requested");
                         // Kernel loading mode
-                        // 1. The kernel file size, in bytes, as a little-endian u32, is sent as 4
-                        //    bytes
+                        // 1. We send the kernel file size, in bytes
                         let mut kernel =
                             File::open(args.kernel.as_ref().ok_or("No kernel provided")?)?;
                         let kernel_size: u32 = kernel.metadata()?.len().try_into()?;
@@ -130,13 +158,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                         //    specified above
                         io::copy(&mut kernel, &mut uart)?;
                         // 3. Wait for a confirmation response
-                        match read_byte(&mut uart)? {
-                            0 => eprintln!("[LOG] Kernel loaded!"),
-                            err => eprintln!("[WARN] Did not receive acknowledgement of connection, error code {err}")
-                        }
+                        check_ok(&mut uart)?;
+                    }
+                    1 => {
+                        eprintln!("[LOG] Baud configuration requested");
+                        // Clock configuration mode
+                        // 1. The connection sends its maximum supported baud rate
+                        let max_supported_baud_rate = read_u32(&mut uart)?;
+                        // 2. We respond with the actual baud rate to use
+                        let baud_rate = args.max_baud.min(max_supported_baud_rate);
+                        eprintln!(
+                            "[LOG] Setting baud rate to {baud_rate} baud ({} KiB/s)",
+                            f64::from(baud_rate) * 0.8 / 1024.0 / 8.0
+                        );
+                        uart.write_all(&baud_rate.to_le_bytes())?;
+                        // 3. Wait for a confirmation response
+                        check_ok(&mut uart)?;
+                        // 4. Now, we can set the baud rate of the connection
+                        uart.set_baud_rate(baud_rate)?;
                     }
                     byte => {
                         eprintln!("[WARN] Bad opcode received: {byte}");
+                        continue;
                     }
                 }
             }

@@ -1,12 +1,13 @@
 //! Driver for the Raspberry Pi's UART. See items for more information
 
 use core::{
+    fmt::{self, Write},
     hint,
     mem::MaybeUninit,
     num::NonZeroUsize,
     ptr::{self, NonNull},
 };
-
+use tock_registers::interfaces::ReadWriteable;
 use tock_registers::{
     interfaces::{Readable, Writeable},
     register_bitfields, register_structs,
@@ -500,6 +501,7 @@ register_structs! {
     }
 }
 
+#[allow(dead_code)]
 impl<'uart> Uart<'uart> {
     /// Creates a wrapper for a memory-mapped UART interface at the given base register address,
     /// and initializes the UART appropriately
@@ -552,6 +554,8 @@ impl<'uart> Uart<'uart> {
             clippy::arithmetic_side_effects,
             reason = "These do not have side effects"
         )]
+        // registers.ibrd.write(IBRD::IBRD.val(3));
+        // registers.fbrd.write(FBRD::FBRD.val(16));
         registers.lcrh.write(
             LCRH::SPS::Disabled
                 + LCRH::WLEN::Bits8
@@ -560,7 +564,6 @@ impl<'uart> Uart<'uart> {
                 + LCRH::PEN::Disabled
                 + LCRH::BRK::Off,
         );
-
         #[expect(
             clippy::arithmetic_side_effects,
             reason = "These do not have side effects"
@@ -575,6 +578,29 @@ impl<'uart> Uart<'uart> {
         );
 
         Some(Self { registers })
+    }
+
+    /// Sets the integral and fractional divisors of the baud rate
+    pub fn set_divider(&mut self, integral: u16, fractional: u8) {
+        // 2. Wait for the end of transmission or reception of the current character.
+        // Note: 2 and 1 are swapped because if the FIFO is enabled, then the busy flag will be
+        // always set if any characters are left in the transmit FIFO, even though no transmission
+        // occurs
+        while self.registers.fr.matches_any(FR::BUSY::Transmitting) {
+            hint::spin_loop();
+        }
+
+        // 1. Disable the UART
+        self.registers.cr.modify(CR::UARTEN::Disabled);
+
+        // 3. Flush the transmit FIFO by setting the FEN bit to 0 in the Line Control Register, UART_LCRH.
+        // This step is not necessary because we have already checked that the entire TX FIFO is
+        // empty
+        // 4. Reprogram the Control Register, UART_CR.
+        self.registers.ibrd.write(IBRD::IBRD.val(integral.into()));
+        self.registers.fbrd.write(FBRD::FBRD.val(fractional.into()));
+        // 5. Enable the UART.
+        self.registers.cr.modify(CR::UARTEN::Enabled);
     }
 
     /// Returns `Ok` if no errors are currently found on the UART, otherwise returns an `Err`
@@ -608,6 +634,18 @@ impl<'uart> Uart<'uart> {
         Ok(())
     }
 
+    /// Writes a little-endian `u32` to the UART
+    ///
+    /// Returns `Ok` if successful
+    ///
+    /// Returns an `Err` if an IO error occurs
+    pub fn write_u32(&mut self, num: u32) -> Result<(), IoError> {
+        for byte in num.to_le_bytes() {
+            self.write_byte(byte)?;
+        }
+        Ok(())
+    }
+
     /// Reads enough bytes to fill the given slice and fully initializes it.
     ///
     /// Guarantees that the buffer is fully initialized if the return value is `Ok`.
@@ -626,10 +664,36 @@ impl<'uart> Uart<'uart> {
         Ok(())
     }
 
+    /// Reads a little-endian `u32`
+    ///
+    /// Returns an `Err` if an IO error occurs
+    pub fn read_u32(&mut self) -> Result<u32, IoError> {
+        #[expect(
+            clippy::as_conversions,
+            reason = "A const-conversion is not possible here in other ways"
+        )]
+        let mut buffer = [MaybeUninit::uninit(); (u32::BITS / 8) as usize];
+        self.read_bytes(&mut buffer)?;
+        // SAFETY: `read_bytes` promises to initialize the buffer
+        Ok(u32::from_le_bytes(unsafe {
+            MaybeUninit::array_assume_init(buffer)
+        }))
+    }
+
     /// Clears all data from the receive FIFO
     pub fn clear_reads(&mut self) {
         while !self.registers.fr.matches_any(FR::RXFE::Empty) {
             self.registers.dr.read(DR_R::DATA);
         }
+    }
+}
+
+#[expect(clippy::missing_trait_methods, reason = "Specialization not necessary")]
+impl Write for Uart<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for byte in s.as_bytes() {
+            self.write_byte(*byte).map_err(|_ignored| fmt::Error)?;
+        }
+        Ok(())
     }
 }

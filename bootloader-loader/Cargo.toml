@@ -11,4 +11,5 @@ test = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bitfield-struct = "0.5.2"
 tock-registers = "0.8.1"
