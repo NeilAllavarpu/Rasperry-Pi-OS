@@ -14,6 +14,8 @@ use tock_registers::{
     registers::{Aliased, ReadOnly, ReadWrite, WriteOnly},
 };
 
+use self::IFLS::RXIFLSEL;
+
 /// IO errors associated with UART
 #[derive(Debug)]
 pub enum IoError {
@@ -541,6 +543,9 @@ impl<'uart> Uart<'uart> {
 
         // 1. Disable the UART
         registers.cr.write(CR::UARTEN::Disabled);
+
+        registers.dmacr.write(DMACR::RXDMAE::Enabled);
+        registers.ifls.modify(RXIFLSEL::OneHalf);
 
         // 3. Flush the transmit FIFO by setting the FEN bit to 0 in the Line Control Register, UART_LCRH.
         // This step is not necessary because we have already checked that the entire TX FIFO is

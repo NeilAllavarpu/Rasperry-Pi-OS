@@ -34,14 +34,17 @@
 #![expect(clippy::separated_literal_suffix, reason = "Desired format")]
 #![feature(stmt_expr_attributes)]
 #![feature(ptr_from_ref)]
+#![feature(const_trait_impl)]
+#![feature(ptr_mask)]
 
-use core::num::NonZeroU32;
-use core::arch::aarch64::{OSH, OSHST, SY};
 mod gpio;
 mod uart;
 mod mailbox;
-use mailbox::{Mailbox, Clock};
+mod dma;
 
+use core::num::NonZeroU32;
+use core::arch::aarch64::{OSH, OSHST, SY};
+use mailbox::{Mailbox, Clock};
 use core::{
     arch::{aarch64, asm},
     mem::MaybeUninit,
@@ -69,6 +72,7 @@ extern "C" fn _start() -> ! {
         asm!(
             // x4 should contain the branched-to address, i.e. _start
             "msr DAIFset, 0b1111", // Disable interrupts until ready
+            "str xzr, [x4]",
             "mrs x29, SCTLR_EL2", // Disable caching
             "mov x28, #0x103",
             "bic x27, x29, x28",
