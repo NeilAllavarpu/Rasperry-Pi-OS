@@ -11,7 +11,7 @@ SECTIONS {
       *(.rodata*)
       *(.data*)
     } : segment_data
-    .bss  : {
+    .bss (NOLOAD) : {
       *(.bss*)
     } : segment_data
     ASSERT((SIZEOF(.eh_frame) == 0), "Should not have unwinding information")

@@ -12,129 +12,109 @@
 #![warn(clippy::suspicious)]
 #![warn(clippy::perf)]
 #![warn(clippy::style)]
-#![allow(clippy::blanket_clippy_restriction_lints)]
+#![expect(clippy::blanket_clippy_restriction_lints)]
 #![warn(clippy::restriction)]
+#![expect(clippy::allow_attributes_without_reason)]
+#![expect(clippy::default_numeric_fallback)]
+#![expect(clippy::implicit_return)]
+#![expect(clippy::inline_asm_x86_intel_syntax)]
+#![expect(clippy::question_mark_used)]
+#![expect(clippy::semicolon_outside_block)]
+#![expect(clippy::single_call_fn)]
 #![feature(asm_const)]
-#![feature(atomic_from_ptr)]
-#![feature(const_nonnull_new)]
-#![feature(const_option)]
 #![feature(generic_arg_infer)]
 #![feature(lint_reasons)]
+#![feature(maybe_uninit_array_assume_init)]
 #![feature(naked_functions)]
-#![feature(stdsimd)]
 #![feature(strict_provenance)]
-#![feature(sync_unsafe_cell)]
-#![feature(never_type)]
 #![feature(panic_info_message)]
-#![feature(pointer_byte_offsets)]
-#![feature(ptr_mask)]
-#![feature(ptr_metadata)]
-#![feature(stmt_expr_attributes)]
-#![allow(clippy::implicit_return)]
-#![allow(clippy::inline_asm_x86_intel_syntax)]
-#![allow(clippy::mod_module_files)]
-#![allow(clippy::semicolon_outside_block)]
-#![feature(const_ptr_as_ref)]
 #![feature(pointer_is_aligned)]
-#![feature(const_pointer_is_aligned)]
-#![feature(const_mut_refs)]
-#![allow(clippy::allow_attributes)]
-use core::arch::aarch64::{__wfe, __wfi};
-use core::arch::asm;
+
 use core::fmt::Write;
+use core::hint;
 use core::num::NonZeroUsize;
-use core::ptr::NonNull;
-use core::slice;
-use core::sync::atomic::Ordering;
-use core::sync::atomic::{AtomicBool, AtomicU8};
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use stdos::cell::InitCell;
-use stdos::heap::{AllocatorBackend, BuddyAllocator};
-use stdos::os::vm::load_elf;
-use stdos::os::vm::AddressSpace;
+use stdos::sync::SpinLock;
 
 mod boot;
-mod execution;
-mod memory_layout;
+mod uart;
+use uart::Uart;
 
-use memory_layout::{FS_ELF, FS_TRANSLATION_TABLE};
+pub static UART: InitCell<SpinLock<Uart>> = InitCell::new();
 
-struct Backend;
-impl AllocatorBackend for Backend {
-    fn grow(&mut self, _: NonNull<()>, _: NonZeroUsize) -> bool {
-        false
-    }
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        writeln!(&mut $crate::UART.lock(), $($arg)*).unwrap();
+    };
 }
 
-extern crate alloc;
-
-pub const FS_TTBR0: u64 = 0x0;
-pub const FS_TTBR0_VIRTUAL: u64 = 0x0;
-
-#[global_allocator]
-static ALLOCATOR: InitCell<BuddyAllocator<Backend>> = InitCell::new();
-#[no_mangle]
-fn main() -> () {}
-/// The primary initialization sequence for the kernel in EL1, that only runs on one core. This
-/// also prepares to launch the file system process
-extern "C" fn init() -> ! {
-    static IS_NOT_FIRST: AtomicBool = AtomicBool::new(false);
-    static IS_INITIALIZED: AtomicBool = AtomicBool::new(false);
-    static C: AtomicU8 = AtomicU8::new(0);
-    let v = C.fetch_add(1, Ordering::Relaxed);
-    if v != 0 {
-        //IS_NOT_FIRST.swap(true, Ordering::Relaxed) {
-        //while !IS_INITIALIZED.load(Ordering::Acquire) {
-        loop {
-            // SAFETY: Executing `wfe` is a safe delay
-            unsafe { __wfe() }
+/// The primary initialization sequence for the kernel in EL1
+extern "C" fn main() -> ! {
+    /// Set only when the global initialization sequence (stuff that only runs once total) is
+    /// finished
+    static GLOBAL_SETUP_DONE: AtomicBool = AtomicBool::new(false);
+    /// Set once all cores have reached this point
+    static CORES_BOOTED: AtomicU8 = AtomicU8::new(0);
+    let ticket = CORES_BOOTED.fetch_add(1, Ordering::Relaxed);
+    if ticket == 0 {
+        #[expect(
+            clippy::unwrap_used,
+            reason = "No reasonable way to recover from failure here"
+        )]
+        let mut uart =
+        // SAFETY: This points to a valid, permanent UART register map in memory. No other
+        // code accesses this concurrently
+            unsafe { Uart::new(NonZeroUsize::new(0xFFFF_FFFF_FFFF_1000).unwrap()) }.unwrap();
+        writeln!(&mut uart, "What just happened? Why am I here?").unwrap();
+        // SAFETY: This is the boot sequence and no one else is accessing the UART yet
+        unsafe {
+            UART.set(SpinLock::new(uart));
         }
+
+        GLOBAL_SETUP_DONE.store(true, Ordering::Release);
     } else {
-        extern "Rust" {
-            static __bss_end: ();
-        }
-        const PAGE_SIZE_1: usize = (1 << 16) - 1;
-        let heap_start = unsafe { NonNull::from(&__bss_end) };
-        let heap_end = heap_start.map_addr(|addr| {
-            NonZeroUsize::new((addr.saturating_add(PAGE_SIZE_1)).get() & !PAGE_SIZE_1).unwrap()
-        });
-        //unsafe { ALLOCATOR.set(BuddyAllocator::new(heap_start, heap_end, Backend {}).unwrap()) };
-        let mut address_space = unsafe { AddressSpace::<16, 25>::new(FS_TRANSLATION_TABLE.va) };
-        let (entry, bss_start, bss_end) = load_elf(
-            &mut address_space,
-            unsafe { NonNull::from_raw_parts(FS_ELF.va, FS_ELF.size.get()).as_ref() },
-            unsafe { FS_ELF.pa }.try_into().unwrap(),
-        )
-        .expect("File system ELF file should be valid");
-
-        // SAFETY: Both addresses are aligned
-        unsafe {
-            address_space.map_range(0x1FF_0000, 0, 0x1_0000, true, false, false);
-        }
-
-        IS_INITIALIZED.store(true, Ordering::Release);
-
-        unsafe {
-            asm!(
-                "sev",
-                "msr ttbr0_el1, {}",
-                "isb sy",
-                "br {}",
-                in (reg) FS_TRANSLATION_TABLE.pa,
-                in (reg) entry,
-                in ("x0") 0x1FF_4000_u64,
-                in ("x1") bss_start,
-                in ("x2") bss_end,
-                options(noreturn)
-            );
+        while !GLOBAL_SETUP_DONE.load(Ordering::Acquire) {
+            hint::spin_loop();
         }
     }
+
+    println!("Hello from core {ticket}");
+
+    loop {
+        hint::spin_loop();
+    }
+
+    // TODO: Last one here, deallocate the null page
 }
 
 /// Panics are unhandled error conditions - the entire system may be forced to shut down
 #[panic_handler]
-fn panic(_: &core::panic::PanicInfo) -> ! {
+#[expect(
+    unused_must_use,
+    reason = "Ignoring any failure conditions as a panic is already a failure condition"
+)]
+fn panic(info: &PanicInfo) -> ! {
+    let mut uart = UART.lock();
+    write!(&mut uart, "PANIC occurred");
+    if let Some(location) = info.location() {
+        write!(
+            &mut uart,
+            " (at {}:{}:{})",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+    }
+    if let Some(args) = info.message() {
+        write!(&mut uart, ": ");
+        uart.write_fmt(*args);
+    }
+    writeln!(&mut uart);
+    drop(uart);
     loop {
-        // SAFETY: Executing `wfi` is a safe delay
-        unsafe { __wfi() }
+        hint::spin_loop();
     }
 }

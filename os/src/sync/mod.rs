@@ -31,11 +31,7 @@ impl<T> SpinLock<T> {
     pub fn lock(&self) -> MutexGuard<T> {
         while self.is_locked.swap(true, Ordering::Acquire) {
             while self.is_locked.load(Ordering::Relaxed) {
-                #[cfg(target_arch = "aarch64")]
-                // SAFETY: This only compiles for `aarch64` targets
-                unsafe {
-                    __wfe();
-                };
+                core::hint::spin_loop();
             }
         }
 
@@ -50,11 +46,6 @@ impl<T> SpinLock<T> {
     #[inline]
     unsafe fn unlock(&self) {
         self.is_locked.store(false, Ordering::Release);
-        #[cfg(target_arch = "aarch64")]
-        // SAFETY: This only compiles for `aarch64` targets
-        unsafe {
-            __sev();
-        }
     }
 }
 
