@@ -3,11 +3,13 @@
 //! begin
 
 use core::mem::MaybeUninit;
+use crate::vm::TRANSLATION_TABLE;
+
+/// Physical address where the init program is initially loaded to.
+const INIT_PHYSICAL_ADDRESS: usize = 0x1000;
 
 /// Page size for the kernel
 const PAGE_SIZE: usize = 1 << 16;
-/// Number of bits in the page offset
-const PAGE_SIZE_BITS: u32 = PAGE_SIZE.ilog2();
 /// Number of usable bits in virtual addresses
 const ADDRESS_BITS: u32 = 25;
 
@@ -17,17 +19,6 @@ const PHYSICAL_LOAD_ADDR: usize = 0x8_0000;
 const VIRTUAL_LINK_ADDR: usize = 0xFFFF_FFFF_FE00_0000;
 /// Shift to transform from physical to virtual addresses
 const VIRTUAL_OFFSET: usize = VIRTUAL_LINK_ADDR - PHYSICAL_LOAD_ADDR;
-
-/// Kernel translation table struct
-#[repr(C)]
-#[repr(align(4096))]
-#[expect(
-    clippy::as_conversions,
-    reason = "Necessary for const conversion to the appropriate type"
-)]
-struct TranslationTable([u64; 1 << (ADDRESS_BITS - PAGE_SIZE_BITS) as usize]);
-/// The kernel translation table itself
-static mut TRANSLATION_TABLE: TranslationTable = TranslationTable([0; _]);
 
 /// Number of cores
 const NUM_CORES: usize = 4;
@@ -56,7 +47,8 @@ const TCR_EL1_INIT: u64 =
     + (1    << 39) // HW managed access bits
     + (1    << 38) // Disable checking the top byte of data pointers
     + (1    << 37) // Same as above, for EL0
-    + (1    << 36) // 16-bit ASIDs
+    + (1    << 36) // 16-bit ASID
+    + (1    << 0b011) // IPS >8GB
     + (0b11 << 30) // 64K pages in EL1
     + (0b11 << 28) // Inner-shareable memory for page walks
     + (0b11 << 26) // Outer-cacheable memory for page walks
@@ -109,7 +101,7 @@ const SCTLR_EL2: u64 =
     | (1     << 5)  // Enable EL0 system barriers
     | (1     << 2); // Data caching
 
-/// The configuration for `HCR_EL`, to disable hypervisor controls
+/// The configuration for `HCR_EL2`, to disable hypervisor controls
 const HCR_EL2: u64 = 
       (1 << 56) // Allow allocation tag access
     | (1 << 41) // Disables pointer authentication trapping
@@ -126,6 +118,21 @@ const TABLE_ENTRY_BASE: u64 =
     | (0b11 << 8)  // Shareability
     |  0b11;       // Valid entry
 
+/// The bits for the init program table entry
+const INIT_TABLE_ENTRY_BASE: u64 = 
+    // (1    << 53) // Privileged execute-never
+     (1    << 11) // Non-global entry
+    | (1    << 10) // Access flag
+    | (0b11 << 8)  // Shareability
+    | (1    << 6)  // EL0 accessible
+    |  0b11;       // Valid entry
+
+/// The configuration for `CPACR_EL1`, to disable various trapping events
+const CPACR_EL1: u64 = 
+    (0b11 << 24) // Disable SME trapping
+    | (0b11 << 20) // Disable FP trapping
+    | (0b11 << 16); // Disable SVE trapping
+
 /// The entry point of the kernel
 /// * Clears the BSS
 /// * Sets up the kernel page table
@@ -140,9 +147,32 @@ unsafe extern "C" fn _start() -> ! {
     unsafe {
         core::arch::asm! {
             "msr DAIFSET, 0b1111", // First, disable interrupts
+            
+            // Move the init program to a suitable location
+            "adr x0, __init_start", // The end of the kernel data, and where init data begins
+
+            // Get the number of bytes of init data
+            // Since this may be unaligned, we do multiple stores to get the data
+            "ldrb w1, [x0]",
+            "ldrb w2, [x0, 1]",
+            "orr x1, x1, x2, LSL 8",
+            "add x2, x0, 2",
+            "mov x27, x1",
+            
+            // Copy the contents to the appropriate location
+            "ldr x3, ={INIT_PHYSICAL_ADDRESS}",
+            "0:",
+            "ldrb w4, [x2], 1",
+            "strb w4, [x3], 1",
+            "sub x1, x1, 1",
+            "cbnz x1, 0b",
+
+            // Set the first PTE of the init translation table to be user RWX appropriately
+            "ldr x1, ={INIT_ENTRY}",
+            "ldr x2, ={INIT_TABLE}",
+            "str x1, [x2], 8",
 
             // Zero BSS
-            "adr x0, __bss_start",
             "adr x1, __bss_end",
             "0: strb wzr, [x0], 1",
             "cmp x0, x1",
@@ -162,15 +192,6 @@ unsafe extern "C" fn _start() -> ! {
             "cmp x0, x1",
             "b.ls 0b",
 
-            // UART
-            "mov x10, 511",
-            "ldr x20, =0xFE200000",
-            "orr x20, x20, 0b100", // Mark UART as device memory
-            "orr x20, x20, x2",
-
-            "adr x3, {TRANSLATION_TABLE}",
-            "str x20, [x3, x10, LSL #3]",
-
             // Wake up other cores
             "mov x0, 0xE0",
             "adr x1, 1f",
@@ -183,6 +204,15 @@ unsafe extern "C" fn _start() -> ! {
 
             "1:",
             "msr DAIFSET, 0b1111",
+            
+            "ldr x0, ={CPACR_EL1}",
+            "msr CPACR_EL1, x0",
+            "msr CPTR_EL2, xzr", // Disable trapping various functionality
+
+            // Enable cache operation broadcasting
+            "mrs x0, S3_1_c15_c2_1",
+            "orr x0, x0, 0b1000000",
+            "msr S3_1_c15_c2_1, x0",
 
             // Put the correct virtual return address for the ERET
             "adr x0, {main}",
@@ -224,7 +254,11 @@ unsafe extern "C" fn _start() -> ! {
             "msr TTBR1_EL1, x0",
 
             "eret",
+            CPACR_EL1 = const CPACR_EL1,
             HCR_EL2 = const HCR_EL2,
+            INIT_ENTRY = const INIT_TABLE_ENTRY_BASE,
+            INIT_PHYSICAL_ADDRESS = const INIT_PHYSICAL_ADDRESS,
+            INIT_TABLE = const crate::INIT_TRANSLATION_ADDRESS,
             main = sym crate::main, // Main initialization sequence
             MAIR_EL1 = const 0xFF, // Attribute for normal memory at index 0, and device memory
                                    // at index 1
@@ -232,10 +266,7 @@ unsafe extern "C" fn _start() -> ! {
             PHYSICAL_START = const PHYSICAL_LOAD_ADDR,
             SCTLR_EL1 = const SCTLR_EL1,
             SCTLR_EL2 = const SCTLR_EL2,
-            SPSR_EL2 = const (
-                (0b1111 << 6) // Keep interrupts disabled
-                | 0b0101 // Use SP_EL1
-            ),
+            SPSR_EL2 = const (0b1111 << 6) | 0b0101, // Use SP_EL1 with interrupts disabled
             STACKS = sym STACKS,
             STACK_SIZE = const STACK_SIZE,
             TABLE_ENTRY_BASE = const TABLE_ENTRY_BASE,

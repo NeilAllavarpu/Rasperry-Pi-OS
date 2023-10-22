@@ -1,5 +1,5 @@
 /* Starting PC of the boot sequence */
-__link_addr = 0xFFFFFFFFFE000000;
+__link_addr = 0x4000;
 __text_start = __link_addr;
 
 SECTIONS {
@@ -19,4 +19,4 @@ SECTIONS {
 
 __bss_start = ADDR(.bss);
 __bss_end = __bss_start + SIZEOF(.bss);
-__init_start = ADDR(.data) + SIZEOF(.data);
+__elf_start = ADDR(.data) + SIZEOF(.data);

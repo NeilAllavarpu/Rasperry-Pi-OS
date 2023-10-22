@@ -63,6 +63,7 @@ register_bitfields! {
             Nonfull = 0,
             Full = 1
         ],
+        TXFE OFFSET(7) NUMBITS(1) [],
     ],
     /// The raw interrupt status register
     RIS [
@@ -184,14 +185,24 @@ impl<'uart> Uart<'uart> {
         self.registers.dr.write(DR_W::DATA.val(byte.into()));
         Ok(())
     }
+
+    /// Writes multiple bytes to the UART
+    ///
+    /// Returns `Ok` if all bytes are written
+    ///
+    /// Returns an `Err` if an IO error occurs at any point
+    pub fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), IoError> {
+        for byte in bytes {
+            self.write_byte(*byte)?;
+        }
+        Ok(())
+    }
 }
 
 #[expect(clippy::missing_trait_methods, reason = "Specialization not necessary")]
 impl Write for Uart<'_> {
     fn write_str(&mut self, string: &str) -> fmt::Result {
-        for byte in string.as_bytes() {
-            self.write_byte(*byte).map_err(|_err| fmt::Error)?;
-        }
-        Ok(())
+        self.write_bytes(string.as_bytes())
+            .map_err(|_err| fmt::Error)
     }
 }

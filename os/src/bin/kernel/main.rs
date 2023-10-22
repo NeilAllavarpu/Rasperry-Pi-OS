@@ -20,8 +20,16 @@
 #![expect(clippy::inline_asm_x86_intel_syntax)]
 #![expect(clippy::question_mark_used)]
 #![expect(clippy::semicolon_outside_block)]
+#![expect(clippy::separated_literal_suffix)]
+#![expect(clippy::mod_module_files)]
+#![expect(clippy::shadow_reuse)]
 #![expect(clippy::single_call_fn)]
+#![expect(clippy::unimplemented)]
+#![expect(clippy::unreachable)]
+#![expect(clippy::todo)]
+#![expect(clippy::panic)]
 #![feature(asm_const)]
+#![feature(const_mut_refs)]
 #![feature(generic_arg_infer)]
 #![feature(lint_reasons)]
 #![feature(maybe_uninit_array_assume_init)]
@@ -29,6 +37,7 @@
 #![feature(strict_provenance)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
+#![feature(stmt_expr_attributes)]
 
 use core::fmt::Write;
 use core::hint;
@@ -39,16 +48,23 @@ use stdos::cell::InitCell;
 use stdos::sync::SpinLock;
 
 mod boot;
+mod exception;
 mod uart;
+mod vm;
 use uart::Uart;
 
-pub static UART: InitCell<SpinLock<Uart>> = InitCell::new();
+/// Physical address of the init program's top-level translation table
+const INIT_TRANSLATION_ADDRESS: u64 = 0x0;
+
+/// The global UART for all prints
+static UART: InitCell<SpinLock<Uart>> = InitCell::new();
 
 #[macro_export]
 macro_rules! println {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
         writeln!(&mut $crate::UART.lock(), $($arg)*).unwrap();
-    };
+    }};
 }
 
 /// The primary initialization sequence for the kernel in EL1
@@ -58,8 +74,17 @@ extern "C" fn main() -> ! {
     static GLOBAL_SETUP_DONE: AtomicBool = AtomicBool::new(false);
     /// Set once all cores have reached this point
     static CORES_BOOTED: AtomicU8 = AtomicU8::new(0);
+
     let ticket = CORES_BOOTED.fetch_add(1, Ordering::Relaxed);
     if ticket == 0 {
+        exception::init();
+        // Create a virtual mapping so that we can access the UART
+        assert!(
+            vm::ADDRESS_SPACE
+                .lock()
+                .map(0xFFFF_FFFF_FFFF_0000, 0xFE20_0000, true, true),
+            "Mapping the UART should not fail"
+        );
         #[expect(
             clippy::unwrap_used,
             reason = "No reasonable way to recover from failure here"
@@ -75,13 +100,30 @@ extern "C" fn main() -> ! {
         }
 
         GLOBAL_SETUP_DONE.store(true, Ordering::Release);
+
+        while CORES_BOOTED.load(Ordering::SeqCst) != 4 {
+            hint::spin_loop();
+        }
+
+        // SAFETY: This correctly sets up a non-returning jump into usermode
+        unsafe {
+            core::arch::asm! {
+                "ldr x0, ={TTBR0_EL1}",
+                "msr TTBR0_EL1, x0",
+                "ldr x0, =0x1000",
+                "msr ELR_EL1, x0",
+                "mov x0, 0b1111000000",
+                "msr SPSR_EL1, x0",
+                "eret",
+                TTBR0_EL1 = const INIT_TRANSLATION_ADDRESS,
+                options(noreturn, nostack)
+            }
+        }
     } else {
         while !GLOBAL_SETUP_DONE.load(Ordering::Acquire) {
             hint::spin_loop();
         }
     }
-
-    println!("Hello from core {ticket}");
 
     loop {
         hint::spin_loop();
