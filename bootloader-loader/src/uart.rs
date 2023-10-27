@@ -544,8 +544,14 @@ impl<'uart> Uart<'uart> {
         // 1. Disable the UART
         registers.cr.write(CR::UARTEN::Disabled);
 
-        registers.dmacr.write(DMACR::RXDMAE::Enabled);
-        registers.ifls.modify(RXIFLSEL::OneHalf);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "These do not have side effects"
+        )]
+        registers.imsc.write(IMSC::RXIM::SET + IMSC::RTIM::SET);
+
+        // registers.dmacr.write(DMACR::RXDMAE::Enabled);
+        registers.ifls.modify(RXIFLSEL::OneEighth);
 
         // 3. Flush the transmit FIFO by setting the FEN bit to 0 in the Line Control Register, UART_LCRH.
         // This step is not necessary because we have already checked that the entire TX FIFO is
@@ -555,12 +561,14 @@ impl<'uart> Uart<'uart> {
         // 5. Enable the UART.
         // ASSUMPTION: The baud rate is programmed by `config.txt` for us
         registers.icr.set(0xFFFF_FFFF);
+
+        // Configured to work with 921_600 baud, the server speed
+        registers.ibrd.write(IBRD::IBRD.val(3));
+        registers.fbrd.write(FBRD::FBRD.val(16));
         #[expect(
             clippy::arithmetic_side_effects,
             reason = "These do not have side effects"
         )]
-        // registers.ibrd.write(IBRD::IBRD.val(3));
-        // registers.fbrd.write(FBRD::FBRD.val(16));
         registers.lcrh.write(
             LCRH::SPS::Disabled
                 + LCRH::WLEN::Bits8
@@ -695,8 +703,8 @@ impl<'uart> Uart<'uart> {
 
 #[expect(clippy::missing_trait_methods, reason = "Specialization not necessary")]
 impl Write for Uart<'_> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        for byte in s.as_bytes() {
+    fn write_str(&mut self, string: &str) -> fmt::Result {
+        for byte in string.as_bytes() {
             self.write_byte(*byte).map_err(|_ignored| fmt::Error)?;
         }
         Ok(())

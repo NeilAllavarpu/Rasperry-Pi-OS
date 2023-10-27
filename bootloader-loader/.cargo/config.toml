@@ -1,5 +1,5 @@
 [build]
-target = "aarch64-unknown-none"
+target = "aarch64-unknown-none-softfloat"
 rustflags = [
   "-Ccode-model=tiny",
   "-Clink-args=-O3 --optimize-bb-jumps --strip-all --oformat=binary --script=bootloader-loader/src/linker.ld",
@@ -19,5 +19,5 @@ codegen-units = 1
 panic = "abort"
 
 [unstable]
-build-std = ["core", "alloc"]
+build-std = ["core"]
 build-std-features = ["panic_immediate_abort"]
