@@ -1,5 +1,6 @@
 //! Driver for the Raspberry Pi's UART. See items for more information
 
+use core::arch::aarch64::{self, OSH};
 use core::fmt::{self, Write};
 use core::hint;
 use core::num::NonZeroUsize;
@@ -177,12 +178,14 @@ impl<'uart> Uart<'uart> {
     /// Returns `Ok` if successful
     ///
     /// Returns an `Err` if an IO error occurs
-    fn write_byte(&mut self, byte: u8) -> Result<(), IoError> {
+    pub fn write_byte(&mut self, byte: u8) -> Result<(), IoError> {
+        unsafe { aarch64::__dmb(OSH) };
         while self.registers.fr.matches_any(FR::TXFF::Full) {
             self.check_errors()?;
             hint::spin_loop();
         }
         self.registers.dr.write(DR_W::DATA.val(byte.into()));
+        unsafe { aarch64::__dmb(OSH) };
         Ok(())
     }
 

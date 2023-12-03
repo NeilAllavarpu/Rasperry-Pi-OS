@@ -123,7 +123,7 @@ pub struct DataAbortIS {
 }
 
 /// Handles a data abort
-pub fn handle(iss: DataAbortIS) {
+pub fn handle(iss: DataAbortIS) -> i64 {
     let far: u64;
     // SAFETY: This touches nothing but a read to FAR_EL1, safely
     unsafe {
@@ -133,7 +133,7 @@ pub fn handle(iss: DataAbortIS) {
             options(nomem, nostack, preserves_flags)
         };
     };
-    panic!("Faulting address {far:X}, ISS {iss:X?}");
+    panic!("Faulting address {far:X}, ISS {iss:X?}")
 }
 
 impl_u32!(DataFaultStatusCode);

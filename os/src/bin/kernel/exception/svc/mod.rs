@@ -1,4 +1,6 @@
 //! System call handler
+use core::{arch::asm, fmt::Write};
+
 use bitfield_struct::bitfield;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -20,7 +22,7 @@ pub struct SvcIS {
 }
 
 /// The general system call handler; dispatches to more specific handlers in other files
-pub fn handle(iss: SvcIS, arg0: u64, arg1: u64) {
+pub fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> i64 {
     match iss.code() {
         CallCode::Exit => {
             todo!("Implement program exits")
@@ -31,9 +33,16 @@ pub fn handle(iss: SvcIS, arg0: u64, arg1: u64) {
             // TODO: actually validate pointers
             // SAFETY: If the user is nice...
             let data_bytes = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
-            UART.lock().write_bytes(data_bytes);
+            let uart = UART.get().expect("UART should be initialized by now");
+            uart.lock()
+                .write_bytes(data_bytes)
+                .expect("UART should not fail");
+            0
         }
-        CallCode::Other => println!("WARNING: Unhandled system call 0x{}", u32::from(iss)),
+        CallCode::Other => {
+            println!("WARNING: Unhandled system call 0x{}", u32::from(iss));
+            return -1;
+        }
     }
 }
 

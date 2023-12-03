@@ -2,6 +2,8 @@
 #![no_std]
 #![feature(naked_functions)]
 
+use core::{arch::asm, fmt::Write};
+
 use stdos::os::syscalls;
 
 #[no_mangle]
@@ -18,8 +20,21 @@ extern "C" fn _start() -> ! {
     }
 }
 
+struct Stdout;
+impl core::fmt::Write for Stdout {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        syscalls::write(s.as_bytes());
+        Ok(())
+    }
+}
+
 extern "C" fn start() -> ! {
-    syscalls::write("Hello from usermode!\n".as_bytes());
+    let mut stdout = Stdout {};
+    stdout.write_str("Hello from usermode!\n");
+    loop {
+        core::hint::spin_loop();
+    }
+    syscalls::write("Unreachable!\n".as_bytes());
     syscalls::exit()
 }
 

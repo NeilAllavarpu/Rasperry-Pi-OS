@@ -41,7 +41,7 @@ use std::io::{self, ErrorKind, Read, Write};
 
 /// The default baud rate when opening a connection; is clamped to the maximum rate passed as an
 /// argument
-const DEFAULT_BAUD_RATE: u32 = 115_200;
+const DEFAULT_BAUD_RATE: u32 = 921_600;
 
 /// Arguments to control the server conection and operations
 #[derive(Parser, Debug)]
@@ -88,13 +88,22 @@ fn read_u32(reader: &mut impl Read) -> io::Result<u32> {
 /// Checks for an OK signal over the connection.
 ///
 /// Propogates any errors from reading the connection
-fn check_ok(reader: &mut impl Read) -> io::Result<()> {
+fn check_ok(reader: &mut impl Read) {
     #[allow(clippy::print_stderr)]
-    match read_byte(reader)? {
-        0 => eprintln!("[LOG] Operation successful!"),
-        err => eprintln!("[WARN] Did not receive acknowledgement of operation, error code {err}"),
+    match read_byte(reader) {
+        Ok(0) => {
+            eprintln!("[LOG] Operation successful!")
+        }
+        Ok(code) => {
+            eprintln!("[WARN] Did not receive acknowledgement of operation, error code {code}")
+        }
+        Err(err) => match err.kind() {
+            ErrorKind::TimedOut => eprintln!(
+                "[WARN] Did not receive acknowledgement of operation, operation timed out"
+            ),
+            _ => {}
+        },
     }
-    Ok(())
 }
 
 #[allow(clippy::print_stdout)]
@@ -138,12 +147,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .flow_control(FlowControl::None)
         .parity(Parity::None)
         .stop_bits(StopBits::One)
-        .timeout(Duration::MAX)
+        .timeout(Duration::from_secs(1))
         .open_native()?;
 
     loop {
-        match read_byte(&mut uart)? {
-            b'\x1B' => {
+        match read_byte(&mut uart) {
+            Ok(b'\x1B') => {
                 // Received a special sequence: use the next byte to figure out what is requested
                 match read_byte(&mut uart)? {
                     0 => {
@@ -154,11 +163,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             File::open(args.kernel.as_ref().ok_or("No kernel provided")?)?;
                         let kernel_size: u32 = kernel.metadata()?.len().try_into()?;
                         uart.write_all(&kernel_size.to_le_bytes())?;
-                        // 2. The contents of the kernel are sent. with the amount of bytes as
+                        // 3. The contents of the kernel are sent, with the amount of bytes as
                         //    specified above
                         io::copy(&mut kernel, &mut uart)?;
-                        // 3. Wait for a confirmation response
-                        check_ok(&mut uart)?;
+                        // 4. Wait for a confirmation response
+                        check_ok(&mut uart);
                     }
                     1 => {
                         eprintln!("[LOG] Baud configuration requested");
@@ -166,14 +175,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // 1. The connection sends its maximum supported baud rate
                         let max_supported_baud_rate = read_u32(&mut uart)?;
                         // 2. We respond with the actual baud rate to use
-                        let baud_rate = args.max_baud.min(max_supported_baud_rate);
+                        let baud_rate = max_supported_baud_rate; // args.max_baud.min(max_supported_baud_rate);
                         eprintln!(
                             "[LOG] Setting baud rate to {baud_rate} baud ({} KiB/s)",
                             f64::from(baud_rate) * 0.8 / 1024.0 / 8.0
                         );
                         uart.write_all(&baud_rate.to_le_bytes())?;
                         // 3. Wait for a confirmation response
-                        check_ok(&mut uart)?;
+                        check_ok(&mut uart);
                         // 4. Now, we can set the baud rate of the connection
                         uart.set_baud_rate(baud_rate)?;
                     }
@@ -183,11 +192,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-            byte => {
+            Ok(byte) => {
                 let mut stdout = io::stdout().lock();
                 stdout.write_all(slice::from_ref(&byte))?;
                 // We want to flush every byte to ensure as accurate printing as possible
                 stdout.flush()?;
+            }
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::TimedOut => {}
+                    _ => Err(err)?,
+                };
             }
         }
     }

@@ -1,5 +1,6 @@
-#![feature(io_error_other)]
-
+use std::fs::File;
+use std::io;
+use std::io::Write;
 use std::{env, path::Path, process::Command};
 
 type DynError = Box<dyn std::error::Error>;
@@ -28,6 +29,11 @@ fn main() -> Result<(), DynError> {
             if !qemu.status()?.success() {
                 Err("qemu failed")?;
             }
+            Ok(())
+        }
+        Some("build") => {
+            let is_debug = matches!(args.next().as_deref(), Some("debug"));
+            build(is_debug, project_root().join("target/dist"))?;
             Ok(())
         }
         Some(unknown) => Err(format!("Unknown command: {}", unknown))?,
@@ -74,6 +80,19 @@ fn build(is_debug: bool, output_dir: impl AsRef<Path>) -> Result<(), DynError> {
             Err("objcopy failed")?
         }
     }
+
+    println!("Built object");
+
+    let mut kernel = File::options()
+        .append(true)
+        .open(output_dir.as_ref().join("kernel"))?;
+    let mut init = File::open(output_dir.as_ref().join("init"))?;
+    let init_length = u16::try_from(init.metadata()?.len())?;
+    assert!(init_length <= u16::MAX - 0x4000);
+    kernel.write(&(init_length.to_le_bytes()))?;
+    io::copy(&mut init, &mut kernel)?;
+
+    println!("Concatenated objects");
 
     Ok(())
 }

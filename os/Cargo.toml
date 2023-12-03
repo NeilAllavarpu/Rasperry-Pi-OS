@@ -6,13 +6,20 @@ edition = "2021"
 [dependencies]
 bitfield-struct = "0.4.4"
 derive_more = "0.99.17"
+hashbrown = "0.14.2"
 num-derive = "0.3.3"
-qemu-exit = "3.0.1"
 tock-registers = "0.8.1"
+
+[dependencies.bitvec]
+version = "1.0.1"
+default-features = false
 
 [dependencies.num-traits]
 version = "0.2.15"
 default-features = false
+
+[dependencies.device-tree]
+path = "../device-tree"
 
 [lib]
 name = "stdos"
@@ -25,5 +32,5 @@ name = "kernel"
 test = false
 
 [[bin]]
-name = "fs"
+name = "init"
 test = false

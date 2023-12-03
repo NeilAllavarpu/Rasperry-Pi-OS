@@ -1,5 +1,5 @@
 /* Starting PC of the boot sequence */
-__link_addr = 0xFFFFFFFFFE000000;
+__link_addr = 0xFFFFFFFFFE080000;
 __text_start = __link_addr;
 
 SECTIONS {

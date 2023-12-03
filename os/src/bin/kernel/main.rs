@@ -28,63 +28,88 @@
 #![expect(clippy::unreachable)]
 #![expect(clippy::todo)]
 #![expect(clippy::panic)]
+#![feature(allocator_api)]
+#![feature(alloc_layout_extra)]
 #![feature(asm_const)]
+#![feature(btreemap_alloc)]
 #![feature(const_mut_refs)]
+#![feature(const_option)]
+#![feature(const_ptr_as_ref)]
+#![feature(ascii_char)]
 #![feature(generic_arg_infer)]
 #![feature(lint_reasons)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(naked_functions)]
-#![feature(strict_provenance)]
+#![feature(pointer_byte_offsets)]
+#![feature(ptr_from_ref)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
+#![feature(slice_ptr_get)]
+#![feature(slice_take)]
+#![feature(stdsimd)]
 #![feature(stmt_expr_attributes)]
+#![feature(strict_provenance)]
 
+use bump_allocator::BumpAllocator;
 use core::fmt::Write;
-use core::hint;
 use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use stdos::cell::InitCell;
+use core::ptr::{addr_of, addr_of_mut, NonNull};
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::{hint, ptr};
+use stdos::cell::OnceLock;
 use stdos::sync::SpinLock;
 
 mod boot;
+mod bump_allocator;
 mod exception;
+mod machine;
+mod mailbox;
 mod uart;
-mod vm;
 use uart::Uart;
+
+extern crate alloc;
+
+use crate::boot::STACK_SIZE;
+use crate::bump_allocator::align_to;
 
 /// Physical address of the init program's top-level translation table
 const INIT_TRANSLATION_ADDRESS: u64 = 0x0;
 
 /// The global UART for all prints
-static UART: InitCell<SpinLock<Uart>> = InitCell::new();
+static UART: OnceLock<SpinLock<Uart>> = OnceLock::new();
 
 #[macro_export]
 macro_rules! println {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        writeln!(&mut $crate::UART.lock(), $($arg)*).unwrap();
+        writeln!(&mut $crate::UART.get().expect("UART should be initialized").lock(), $($arg)*).unwrap();
     }};
 }
 
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        write!(&mut $crate::UART.get().expect("UART should be initialized").lock(), $($arg)*).unwrap();
+    }};
+}
+
+#[global_allocator]
+static mut GLOB: BumpAllocator = BumpAllocator::empty();
+
 /// The primary initialization sequence for the kernel in EL1
-extern "C" fn main() -> ! {
+extern "C" fn main(device_tree_address: Option<NonNull<u64>>) -> ! {
     /// Set only when the global initialization sequence (stuff that only runs once total) is
     /// finished
     static GLOBAL_SETUP_DONE: AtomicBool = AtomicBool::new(false);
-    /// Set once all cores have reached this point
-    static CORES_BOOTED: AtomicU8 = AtomicU8::new(0);
-
-    let ticket = CORES_BOOTED.fetch_add(1, Ordering::Relaxed);
-    if ticket == 0 {
+    if machine::core_id() == 0 {
+        extern "C" {
+            static mut __bss_end: u8;
+        }
         exception::init();
+
         // Create a virtual mapping so that we can access the UART
-        assert!(
-            vm::ADDRESS_SPACE
-                .lock()
-                .map(0xFFFF_FFFF_FFFF_0000, 0xFE20_0000, true, true),
-            "Mapping the UART should not fail"
-        );
         #[expect(
             clippy::unwrap_used,
             reason = "No reasonable way to recover from failure here"
@@ -92,18 +117,35 @@ extern "C" fn main() -> ! {
         let mut uart =
         // SAFETY: This points to a valid, permanent UART register map in memory. No other
         // code accesses this concurrently
-            unsafe { Uart::new(NonZeroUsize::new(0xFFFF_FFFF_FFFF_1000).unwrap()) }.unwrap();
+            unsafe { Uart::new(NonZeroUsize::new(0xFFFF_FFFF_FE20_1000).unwrap()) }.unwrap();
+
         writeln!(&mut uart, "What just happened? Why am I here?").unwrap();
-        // SAFETY: This is the boot sequence and no one else is accessing the UART yet
+        assert!(
+            matches!(UART.set(SpinLock::new(uart)), Ok(())),
+            "UART should not already be initialized"
+        );
+
+        let stack_end = NonNull::new(unsafe { addr_of_mut!(__bss_end) })
+            .unwrap()
+            .map_addr(|bss_end| {
+                NonZeroUsize::new(bss_end.get().next_multiple_of(16) + STACK_SIZE * 4).unwrap()
+            });
+
         unsafe {
-            UART.set(SpinLock::new(uart));
+            GLOB.set(
+                stack_end,
+                stack_end.with_addr(NonZeroUsize::new(0xFFFF_FFFF_FE20_0000).unwrap()),
+            );
         }
+
+        machine::get_info(
+            device_tree_address
+                .expect("Device tree address should be nonnull and correctly in virtual memory"),
+        );
+
+        println!("got myself {:?}", machine::INFO.get());
 
         GLOBAL_SETUP_DONE.store(true, Ordering::Release);
-
-        while CORES_BOOTED.load(Ordering::SeqCst) != 4 {
-            hint::spin_loop();
-        }
 
         // SAFETY: This correctly sets up a non-returning jump into usermode
         unsafe {
@@ -112,8 +154,9 @@ extern "C" fn main() -> ! {
                 "msr TTBR0_EL1, x0",
                 "ldr x0, =0x1000",
                 "msr ELR_EL1, x0",
-                "mov x0, 0b1111000000",
+                "mov x0, 0b0",
                 "msr SPSR_EL1, x0",
+                "msr DAIFClr, 0b1111",
                 "eret",
                 TTBR0_EL1 = const INIT_TRANSLATION_ADDRESS,
                 options(noreturn, nostack)
@@ -139,23 +182,26 @@ extern "C" fn main() -> ! {
     reason = "Ignoring any failure conditions as a panic is already a failure condition"
 )]
 fn panic(info: &PanicInfo) -> ! {
-    let mut uart = UART.lock();
-    write!(&mut uart, "PANIC occurred");
-    if let Some(location) = info.location() {
-        write!(
-            &mut uart,
-            " (at {}:{}:{})",
-            location.file(),
-            location.line(),
-            location.column()
-        );
+    // Make sure that this doesn't overlap with other peripheral accesses
+    if let Some(uart) = UART.get() {
+        let mut uart = uart.lock();
+        write!(&mut uart, "PANIC occurred");
+        if let Some(location) = info.location() {
+            write!(
+                &mut uart,
+                " (at {}:{}:{})",
+                location.file(),
+                location.line(),
+                location.column()
+            );
+        }
+        if let Some(args) = info.message() {
+            write!(&mut uart, ": ");
+            uart.write_fmt(*args);
+        }
+        writeln!(&mut uart);
+        drop(uart);
     }
-    if let Some(args) = info.message() {
-        write!(&mut uart, ": ");
-        uart.write_fmt(*args);
-    }
-    writeln!(&mut uart);
-    drop(uart);
     loop {
         hint::spin_loop();
     }

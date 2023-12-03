@@ -2,12 +2,11 @@ mod exception;
 pub mod syscalls;
 pub mod vm;
 
-use crate::cell::InitCell;
 use crate::sync::SpinLock;
 use core::arch::asm;
 use core::ptr::NonNull;
 use vm::AddressSpace;
-
+/*
 /// The entry point of a program. Maps a stack for itself and then hands control off to Rust
 /// initialization code
 #[no_mangle]
@@ -62,7 +61,7 @@ extern "C" fn _start(ttbr0_virtual: *mut ()) -> ! {
             options(noreturn))
     }
 }
-
+*/
 /// Performs initialization functions, and then hands off execution to `main`
 extern "C" fn wrapper(ttbr0_virtual: *mut ()) -> ! {
     extern "C" {
@@ -82,7 +81,7 @@ extern "C" fn wrapper(ttbr0_virtual: *mut ()) -> ! {
     };
     // SAFETY: No one else can access this address space yet, and will not be able to do so until
     // `main` is called
-    unsafe { vm::ADDRESS_SPACE.set(SpinLock::new(address_space)) };
+    // unsafe { vm::ADDRESS_SPACE.set(SpinLock::new(address_space)) };
     // SAFETY: It is up to the application to properly define `main`
     unsafe { main() };
     todo!("Handle process cleanup and exit");

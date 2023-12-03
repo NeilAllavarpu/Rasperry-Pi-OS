@@ -1,48 +1,80 @@
 use core::cell::SyncUnsafeCell;
+use core::mem::MaybeUninit;
 use core::ops::Deref;
 use core::ptr::NonNull;
+use core::sync::atomic::AtomicBool;
+use core::sync::atomic::Ordering;
 
 /// A cell that may only be initialized once and exactly once
-pub struct InitCell<T>(SyncUnsafeCell<Option<T>>);
-
-impl<T> InitCell<T> {
-    /// Creates a new, empty `InitCell`
-    pub const fn new() -> Self {
-        Self(SyncUnsafeCell::new(None))
-    }
-
-    fn get_pointer(&self) -> NonNull<Option<T>> {
-        // SAFETY: This pointer is never null
-        unsafe { NonNull::new_unchecked(self.0.get()) }
-    }
-
-    /// Sets the `InitCell` to the given value
-    ///
-    /// # Safety
-    ///
-    /// The `InitCell` must be fully set before anyone attempts to read its value, and may only be
-    /// set once.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this method is called multiple times and the executions are non-concurrent. May
-    /// not panic if this method is called concurrently
-    pub unsafe fn set(&self, value: T) {
-        // SAFETY: The caller guarantees that we have exclusive, mutable access to the cell
-        let inner = unsafe { self.get_pointer().as_mut() };
-        assert!(inner.is_none());
-        *inner = Some(value);
-    }
+pub struct OnceLock<T> {
+    /// The actual contents of the `OnceLock`
+    contents: SyncUnsafeCell<Option<T>>,
+    /// Whether or not the `OnceLock` is fully initialized
+    is_set: AtomicBool,
+    /// Whether or not the `OnceLock` is in the process of initializing
+    is_setting: AtomicBool,
 }
 
-impl<T> Deref for InitCell<T> {
-    type Target = T;
+impl<T> OnceLock<T> {
+    /// Creates a new, empty `InitCell`
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            contents: SyncUnsafeCell::new(None),
+            is_set: AtomicBool::new(false),
+            is_setting: AtomicBool::new(false),
+        }
+    }
 
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: By assumption, the `InitCell` has already been constructed mutably, so no
-        // mutable references are possible`
-        unsafe { self.get_pointer().as_ref() }
-            .as_ref()
-            .expect("`InitCell` should be initialized before access")
+    /// Sets the `InitCell` to the given value, if the value is not already set or being set
+    ///
+    /// Returns whether or not the setting operation was successful. Fails if already set or there
+    /// are concurrent setters
+    #[inline]
+    pub fn set(&self, value: T) -> Result<(), T> {
+        if self.is_setting.swap(true, Ordering::Relaxed) {
+            Err(value)
+        } else {
+            assert!(
+                !self.is_set.load(Ordering::Relaxed),
+                "Init cell should not already be set"
+            );
+            {
+                let inner_pointer = self.contents.get();
+                let inner_ref =
+                // SAFETY: This is the only thing that can possibly access the contents at this
+                // time and so a mutable reference is safe
+                unsafe { inner_pointer.as_mut() }.expect("Contents should never be null addressed");
+
+                assert!(
+                    matches!(inner_ref.replace(value), None),
+                    "Init cell should not be already be set"
+                );
+            }
+            assert!(
+                !self.is_set.swap(true, Ordering::Release),
+                "Init cell should not already be set"
+            );
+
+            Ok(())
+        }
+    }
+
+    /// Gets the reference to the underlying value.
+    ///
+    /// Returns `None` if the cell is empty, or being initialized. This method never blocks.
+    #[inline]
+    pub fn get(&self) -> Option<&T> {
+        if self.is_set.load(Ordering::Acquire) {
+            let inner_pointer = self.contents.get();
+            let inner_ref =
+                // SAFETY: All initializers are done by this point, and so no one else has a
+                // mutable reference to the contents
+                unsafe { inner_pointer.as_ref() }.expect("Contents should never be null addressed");
+
+            inner_ref.as_ref()
+        } else {
+            None
+        }
     }
 }

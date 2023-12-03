@@ -1,5 +1,6 @@
 //! Primary exception handlers
 
+use crate::println;
 use bitfield_struct::bitfield;
 use core::arch::{asm, global_asm};
 use core::fmt;
@@ -7,6 +8,7 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
 mod data_abort;
+mod gic;
 mod svc;
 
 /// Indicates the reason for the exception that `ESR_EL1` holds information about
@@ -178,7 +180,7 @@ struct ExceptionSyndrome {
 }
 
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
-extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) {
+extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> i64 {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -240,11 +242,29 @@ pub fn init() {
             options(nomem, nostack, preserves_flags),
         };
     };
+    gic::init();
 }
 
 /// Handles any IRQ exceptions
 extern "C" fn irq_exception() {
-    todo!("Handle IRQ");
+    let interrupt_info =
+        unsafe { core::ptr::read_volatile((0xFFFF_FFFF_FE64_2000_usize + 0x000C) as *mut u32) };
+
+    let freq: u64;
+    unsafe {
+        asm!("mrs {}, CNTFRQ_EL0", out(reg) freq);
+    }
+    unsafe {
+        asm!("msr CNTP_TVAL_EL0, {}", in(reg) freq);
+    }
+
+    unsafe {
+        core::ptr::write_volatile(
+            (0xFFFF_FFFF_FE64_2000_usize + 0x0010) as *mut u32,
+            interrupt_info,
+        )
+    }; // eoir
+    println!("Handle IRQ {}", interrupt_info);
 }
 
 /// Handles any exceptions should `SP_EL0` be erroneously used

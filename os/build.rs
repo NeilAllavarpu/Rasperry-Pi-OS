@@ -1,6 +1,7 @@
 use std::env;
 
 const PATH_TO_LINKER_SCRIPT: &str = "src/bin/kernel/linker.ld";
+const PATH_TO_INIT_LINKER_SCRIPT: &str = "src/bin/init/linker.ld";
 
 fn main() -> Result<(), String> {
     // "The build script’s current directory is the source directory of the build script’s
@@ -17,12 +18,11 @@ fn main() -> Result<(), String> {
         })?;
 
     // Link with the custom linker script for only the kernel
-    println!(
-        "cargo:rustc-link-arg-bin=kernel=--script={}/{}",
-        path, PATH_TO_LINKER_SCRIPT
-    );
+    println!("cargo:rustc-link-arg-bin=kernel=--script={path}/{PATH_TO_LINKER_SCRIPT}");
+    println!("cargo:rustc-link-arg-bin=init=--script={path}/{PATH_TO_INIT_LINKER_SCRIPT}");
     // Disable section alignment
     println!("cargo:rustc-link-arg-bin=kernel=-n");
+    println!("cargo:rustc-link-arg-bin=init=-n");
     // Produce a raw, stripped binary instead of an ELF, only for non-debugmode
     // In debug mode, we need the ELF to contain symbols
     // Later steps will then produce the appropriate binary while still having debug info
@@ -35,6 +35,7 @@ fn main() -> Result<(), String> {
     {
         "false" => {
             println!("cargo:rustc-link-arg-bin=kernel=--oformat=binary");
+            println!("cargo:rustc-link-arg-bin=init=--oformat=binary");
             println!("cargo:rustc-link-arg=--strip-all");
         }
         "true" => {}

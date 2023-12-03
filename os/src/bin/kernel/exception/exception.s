@@ -1,36 +1,36 @@
 // Creates an exception handler that calls the given handler
 .macro EXCEPTION_HANDLER handler
-	// Save all registers that are not necessarily preserved by the C ABI
-  // Calling the handler will preserve the remaining registers
-	stp	x0, x1, [sp, #-0xA0]! // This also allocates stack space for the context
-	stp	x2, x3, [sp, #0x10]
-	stp	x4, x5, [sp, #0x20]
-	stp	x6, x7, [sp, #0x30]
-	stp	x8, x9, [sp, #0x40]
-	stp	x10, x11, [sp, #0x50]
-	stp	x12, x13, [sp, #0x60]
-	stp	x14, x15, [sp, #0x70]
-	stp	x16, x17, [sp, #0x80]
-	stp	x18, lr, [sp, #0x90]
+    // Save all registers that are not necessarily preserved by the C ABI
+    // Calling the handler will preserve the remaining registers
+    stp    x0, x1, [sp, #-0xA0]! // This also allocates stack space for the context
+    stp    x2, x3, [sp, #0x10]
+    stp    x4, x5, [sp, #0x20]
+    stp    x6, x7, [sp, #0x30]
+    stp    x8, x9, [sp, #0x40]
+    stp    x10, x11, [sp, #0x50]
+    stp    x12, x13, [sp, #0x60]
+    stp    x14, x15, [sp, #0x70]
+    stp    x16, x17, [sp, #0x80]
+    stp    x18, lr, [sp, #0x90]
 
-	bl	\handler
+    bl    \handler
 
-	// Upon end of handler, return from the exception
-  // NOTE: the exception vector is limited to 32 instructions per handler, so
-  // this must be very short to fit in
+    // Upon end of handler, return from the exception
+    // NOTE: the exception vector is limited to 32 instructions per handler, so
+    // this must be very short to fit in
 
-	// Restore everything in reverse order that it was saved
-	ldp	x18, lr, [sp, #0x90]
-	ldp	x16, x17, [sp, #0x80]
-	ldp	x14, x15, [sp, #0x70]
-	ldp	x12, x13, [sp, #0x60]
-	ldp	x10, x11, [sp, #0x50]
-	ldp	x8, x9, [sp, #0x40]
-	ldp	x6, x7, [sp, #0x30]
-	ldp	x4, x5, [sp, #0x20]
-	ldp	x2, x3, [sp, #0x10]
-	ldp	x0, x1, [sp], #0xA0 // This also restores the stack pointer
-	eret
+    // Restore everything in reverse order that it was saved
+    ldp    x18, lr, [sp, #0x90]
+    ldp    x16, x17, [sp, #0x80]
+    ldp    x14, x15, [sp, #0x70]
+    ldp    x12, x13, [sp, #0x60]
+    ldp    x10, x11, [sp, #0x50]
+    ldp    x8, x9, [sp, #0x40]
+    ldp    x6, x7, [sp, #0x30]
+    ldp    x4, x5, [sp, #0x20]
+    ldp    x2, x3, [sp, #0x10]
+    ldp    x0, x1, [sp], #0xA0 // This also restores the stack pointer
+    eret
 .endm
 
 .section .text
@@ -40,37 +40,37 @@
 _exception_vector:
 // The first 4 are taken if we use SP_EL0 at the current exception level, which we should never use
 .balign 0x80
-  b {from_sp_el0}
+    b {from_sp_el0}
 .balign 0x80
-  b {from_sp_el0}
+    b {from_sp_el0}
 .balign 0x80
-  b {from_sp_el0}
+    b {from_sp_el0}
 .balign 0x80
-  b {from_sp_el0}
+    b {from_sp_el0}
 // These are taken if we use SP_EL1 and are in EL1
 .balign 0x80
-  b {synchronous_from_el1} // The kernel is designed to never raise an exception itself
+    b {synchronous_from_el1} // The kernel is designed to never raise an exception itself
 .balign 0x80
-	EXCEPTION_HANDLER {irq} // IRQs taken while in EL1
+    EXCEPTION_HANDLER {irq} // IRQs taken while in EL1
 .balign 0x80
-	b {fiq} // FIQs should never be enabled for any peripheral
+    b {fiq} // FIQs should never be enabled for any peripheral
 .balign 0x80
-	b {serror} // Can SErrors occur?
+    b {serror} // Can SErrors occur?
 // These are taken if we were in AArch64 EL0
 .balign 0x80
-  EXCEPTION_HANDLER {synchronous_from_el0} // EL0 synchronous exceptions
+    EXCEPTION_HANDLER {synchronous_from_el0} // EL0 synchronous exceptions
 .balign 0x80
-	EXCEPTION_HANDLER {irq} // IRQs taken while in EL0
+    EXCEPTION_HANDLER {irq} // IRQs taken while in EL0
 .balign 0x80
-	b {fiq} // FIQs should never be enabled for any peripheral
+    b {fiq} // FIQs should never be enabled for any peripheral
 .balign 0x80
-	b {serror} // Can SErrors occur?
+    b {serror} // Can SErrors occur?
 // These are taken if we were in AArch32 EL0 - currently not supported
 .balign 0x80
-  b {aarch32}
+    b {aarch32}
 .balign 0x80
-	b {aarch32}
+    b {aarch32}
 .balign 0x80
-	b {aarch32}
+    b {aarch32}
 .balign 0x80
-	b {aarch32}
+    b {aarch32}

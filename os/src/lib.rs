@@ -47,7 +47,6 @@
 )]
 #![feature(allocator_api)]
 #![feature(asm_const)]
-#![feature(const_inherent_unchecked_arith)]
 #![feature(const_mut_refs)]
 #![feature(const_ptr_as_ref)]
 #![feature(const_option)]
@@ -73,6 +72,7 @@
 #![feature(ptr_from_ref)]
 #![feature(ptr_mask)]
 #![feature(unchecked_math)]
+#![feature(unchecked_shifts)]
 
 pub mod cell;
 pub mod heap;
