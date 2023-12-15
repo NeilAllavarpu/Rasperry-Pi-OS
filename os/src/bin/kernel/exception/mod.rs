@@ -7,8 +7,11 @@ use core::fmt;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
+use svc::SvcReturn;
+
 mod data_abort;
 mod gic;
+mod instruction_abort;
 mod svc;
 
 /// Indicates the reason for the exception that `ESR_EL1` holds information about
@@ -159,6 +162,7 @@ enum InstructionLength {
 union InstructionSyndrome {
     /// Data abort instruction syndrome
     data_abort: data_abort::DataAbortIS,
+    instruction_abort: instruction_abort::InstructionAbortIS,
     /// SVC instruction syndrome
     svc: svc::SvcIS,
     /// Raw bits for the instruction syndrome. Only the lower 25 bits are meaningful
@@ -180,7 +184,7 @@ struct ExceptionSyndrome {
 }
 
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
-extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> i64 {
+extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> SvcReturn {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -196,16 +200,28 @@ extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> i64 {
 
     #[expect(clippy::wildcard_enum_match_arm)]
     match esr.exception_class() {
-        ExceptionClass::DataAbortEL0 => data_abort::handle(
-            // SAFETY: This is the correct ISS and set validly
-            unsafe { iss.data_abort },
-        ),
-        ExceptionClass::SvcAArch64 => svc::handle(
-            // SAFETY: This is the correct ISS and set validly
-            unsafe { iss.svc },
-            x0,
-            x1,
-        ),
+        ExceptionClass::DataAbortEL0 => {
+            data_abort::handle(
+                // SAFETY: This is the correct ISS and set validly
+                unsafe { iss.data_abort },
+            );
+            unreachable!()
+        }
+        ExceptionClass::SvcAArch64 => {
+            svc::handle(
+                // SAFETY: This is the correct ISS and set validly
+                unsafe { iss.svc },
+                x0,
+                x1,
+            )
+        }
+        ExceptionClass::InstructionAbortEL0 => {
+            instruction_abort::handle(
+                // SAFETY: This is the correct ISS and set validly
+                unsafe { iss.instruction_abort },
+            );
+            unreachable!()
+        }
         ExceptionClass::BreakpointEL1
         | ExceptionClass::SoftwareStepEL1
         | ExceptionClass::WatchpointEL1

@@ -86,11 +86,32 @@ fn build(is_debug: bool, output_dir: impl AsRef<Path>) -> Result<(), DynError> {
     let mut kernel = File::options()
         .append(true)
         .open(output_dir.as_ref().join("kernel"))?;
-    let mut init = File::open(output_dir.as_ref().join("init"))?;
-    let init_length = u16::try_from(init.metadata()?.len())?;
-    assert!(init_length <= u16::MAX - 0x4000);
-    kernel.write(&(init_length.to_le_bytes()))?;
-    io::copy(&mut init, &mut kernel)?;
+
+    let to_append = ["init", "serial"];
+    let files = to_append
+        .iter()
+        .map(|x| File::open(output_dir.as_ref().join(x)).unwrap())
+        .collect::<Box<[_]>>();
+    let lengths = files
+        .iter()
+        .map(|x| u16::try_from(x.metadata().unwrap().len()).unwrap())
+        .collect::<Box<[_]>>();
+    let mut suffix_sum = lengths
+        .iter()
+        .rev()
+        .scan(0_u16, |x, &y| {
+            *x += y.checked_add(2).unwrap();
+            Some(*x)
+        })
+        .map(|x| x - 2)
+        .collect::<Box<[_]>>();
+    suffix_sum.reverse();
+    println!("lens {lengths:?}");
+    println!("suffix sum {suffix_sum:?}");
+    for (mut file, &len) in files.iter().zip(suffix_sum.iter()) {
+        kernel.write_all(&(len.to_le_bytes()))?;
+        io::copy(&mut file, &mut kernel)?;
+    }
 
     println!("Concatenated objects");
 

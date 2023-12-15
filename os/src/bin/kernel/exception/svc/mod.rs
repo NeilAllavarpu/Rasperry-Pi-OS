@@ -5,12 +5,13 @@ use bitfield_struct::bitfield;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
-use crate::{impl_u32, println, UART};
+use crate::{impl_u32, memory::PAGE_ALLOCATOR, println, UART};
 
 #[derive(FromPrimitive, ToPrimitive, Debug)]
 enum CallCode {
     Print = 0x1000,
     Exit = 0x2000,
+    AllocPage = 0x3000,
     Other,
 }
 
@@ -21,8 +22,53 @@ pub struct SvcIS {
     __: u16,
 }
 
+#[repr(C)]
+pub struct SvcReturn {
+    is_success: bool,
+    values: (usize),
+}
+
+impl From<SvcReturn> for (usize, usize) {
+    fn from(value: SvcReturn) -> Self {
+        (usize::from(value.is_success), value.values)
+    }
+}
+
+macro_rules! ret {
+    ($is_success:expr) => {{
+        SvcReturn {
+            is_success: $is_success,
+            values: Default::default(),
+        }
+    }};
+    ($is_success:expr, $val:expr) => {{
+        SvcReturn {
+            is_success: $is_success,
+            values: $val,
+        }
+    }};
+}
+
+macro_rules! success {
+    () => {
+        ret!(true)
+    };
+    ($val:expr) => {
+        ret!(true, $val)
+    };
+}
+
+macro_rules! fail {
+    () => {
+        ret!(false)
+    };
+    ($val:expr) => {
+        ret!(false, $val)
+    };
+}
+
 /// The general system call handler; dispatches to more specific handlers in other files
-pub fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> i64 {
+pub extern "C" fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> SvcReturn {
     match iss.code() {
         CallCode::Exit => {
             todo!("Implement program exits")
@@ -37,11 +83,19 @@ pub fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> i64 {
             uart.lock()
                 .write_bytes(data_bytes)
                 .expect("UART should not fail");
-            0
+            success!()
+        }
+        CallCode::AllocPage => {
+            if let Some(result) = PAGE_ALLOCATOR.get().unwrap().alloc() {
+                // TODO: store this page for the process
+                success!(result.addr() as usize)
+            } else {
+                fail!()
+            }
         }
         CallCode::Other => {
             println!("WARNING: Unhandled system call 0x{}", u32::from(iss));
-            return -1;
+            fail!()
         }
     }
 }

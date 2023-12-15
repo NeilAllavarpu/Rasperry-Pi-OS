@@ -15,9 +15,6 @@ use core::{
 use device_tree::{dtb::DeviceTree, node::Node};
 
 use alloc::{borrow::ToOwned, boxed::Box, collections::BTreeMap, string::String, vec::Vec};
-use hashbrown::HashMap;
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
 use stdos::cell::OnceLock;
 
 use crate::{
@@ -28,8 +25,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct MachineInfo {
-    cores: u8,
-    memory: Box<[(u64, u64)]>,
+    pub cores: u8,
+    pub memory: Box<[(u64, u64)]>,
 }
 
 pub static INFO: OnceLock<MachineInfo> = OnceLock::new();

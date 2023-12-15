@@ -57,8 +57,9 @@ _exception_vector:
 .balign 0x80
     b {serror} // Can SErrors occur?
 // These are taken if we were in AArch64 EL0
-.balign 0x80
-    EXCEPTION_HANDLER {synchronous_from_el0} // EL0 synchronous exceptions
+.balign 0x80 // Synchronous exception: only an SVC should be able to return, and it should have already formatted the registers accordingly
+    bl    {synchronous_from_el0}
+    eret
 .balign 0x80
     EXCEPTION_HANDLER {irq} // IRQs taken while in EL0
 .balign 0x80

@@ -26,6 +26,7 @@
 #![expect(clippy::single_call_fn)]
 #![expect(clippy::unimplemented)]
 #![expect(clippy::unreachable)]
+#![expect(clippy::expect_used)]
 #![expect(clippy::todo)]
 #![expect(clippy::panic)]
 #![feature(allocator_api)]
@@ -36,11 +37,11 @@
 #![feature(const_option)]
 #![feature(const_ptr_as_ref)]
 #![feature(ascii_char)]
+#![feature(exposed_provenance)]
 #![feature(generic_arg_infer)]
 #![feature(lint_reasons)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(naked_functions)]
-#![feature(pointer_byte_offsets)]
 #![feature(ptr_from_ref)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
@@ -48,30 +49,34 @@
 #![feature(slice_take)]
 #![feature(stdsimd)]
 #![feature(stmt_expr_attributes)]
+#![feature(iterator_try_collect)]
+#![feature(let_chains)]
+#![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(strict_provenance)]
 
 use bump_allocator::BumpAllocator;
 use core::fmt::Write;
+use core::hint;
 use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
-use core::ptr::{addr_of, addr_of_mut, NonNull};
+use core::ptr::{addr_of_mut, NonNull};
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::{hint, ptr};
 use stdos::cell::OnceLock;
 use stdos::sync::SpinLock;
 
 mod boot;
 mod bump_allocator;
 mod exception;
+mod execution;
 mod machine;
 mod mailbox;
+mod memory;
 mod uart;
 use uart::Uart;
 
 extern crate alloc;
 
 use crate::boot::STACK_SIZE;
-use crate::bump_allocator::align_to;
 
 /// Physical address of the init program's top-level translation table
 const INIT_TRANSLATION_ADDRESS: u64 = 0x0;
@@ -143,22 +148,25 @@ extern "C" fn main(device_tree_address: Option<NonNull<u64>>) -> ! {
                 .expect("Device tree address should be nonnull and correctly in virtual memory"),
         );
 
-        println!("got myself {:?}", machine::INFO.get());
+        unsafe {
+            memory::init(
+                machine::INFO.get().unwrap().memory.iter(),
+                &[(0x8_0000, 0x18_0000), (0, 0x1_0000)].iter(),
+            );
+        }
 
         GLOBAL_SETUP_DONE.store(true, Ordering::Release);
 
         // SAFETY: This correctly sets up a non-returning jump into usermode
         unsafe {
             core::arch::asm! {
-                "ldr x0, ={TTBR0_EL1}",
                 "msr TTBR0_EL1, x0",
-                "ldr x0, =0x1000",
-                "msr ELR_EL1, x0",
-                "mov x0, 0b0",
-                "msr SPSR_EL1, x0",
-                "msr DAIFClr, 0b1111",
+                "msr SPSR_EL1, {SPSR_EL1}",
+                "msr ELR_EL1, {ELR_EL1}",
                 "eret",
-                TTBR0_EL1 = const INIT_TRANSLATION_ADDRESS,
+                in("x0") INIT_TRANSLATION_ADDRESS,
+                SPSR_EL1 = in(reg) 0b0_u64,
+                ELR_EL1 = in(reg) 0x1000_usize,
                 options(noreturn, nostack)
             }
         }
@@ -171,8 +179,6 @@ extern "C" fn main(device_tree_address: Option<NonNull<u64>>) -> ! {
     loop {
         hint::spin_loop();
     }
-
-    // TODO: Last one here, deallocate the null page
 }
 
 /// Panics are unhandled error conditions - the entire system may be forced to shut down
