@@ -160,13 +160,13 @@ impl<'uart> Uart<'uart> {
     /// corresponding to the first error found (arbitrarily decided).
     fn check_errors(&self) -> Result<(), IoError> {
         let ris = self.registers.ris.extract();
-        if ris.matches_any(RIS::OERIS::Pending) {
+        if ris.matches_any(&[RIS::OERIS::Pending]) {
             Err(IoError::Overrun)
-        } else if ris.matches_any(RIS::BERIS::Pending) {
+        } else if ris.matches_any(&[RIS::BERIS::Pending]) {
             Err(IoError::Break)
-        } else if ris.matches_any(RIS::PERIS::Pending) {
+        } else if ris.matches_any(&[RIS::PERIS::Pending]) {
             Err(IoError::Parity)
-        } else if ris.matches_any(RIS::FERIS::Pending) {
+        } else if ris.matches_any(&[RIS::FERIS::Pending]) {
             Err(IoError::Frame)
         } else {
             Ok(())
@@ -179,13 +179,19 @@ impl<'uart> Uart<'uart> {
     ///
     /// Returns an `Err` if an IO error occurs
     pub fn write_byte(&mut self, byte: u8) -> Result<(), IoError> {
-        unsafe { aarch64::__dmb(OSH) };
-        while self.registers.fr.matches_any(FR::TXFF::Full) {
+        // SAFETY: This is well defined on the Raspberry Pi
+        unsafe {
+            aarch64::__dmb(OSH);
+        }
+        while self.registers.fr.matches_any(&[FR::TXFF::Full]) {
             self.check_errors()?;
             hint::spin_loop();
         }
         self.registers.dr.write(DR_W::DATA.val(byte.into()));
-        unsafe { aarch64::__dmb(OSH) };
+        // SAFETY: This is well defined on the Raspberry Pi
+        unsafe {
+            aarch64::__dmb(OSH);
+        }
         Ok(())
     }
 

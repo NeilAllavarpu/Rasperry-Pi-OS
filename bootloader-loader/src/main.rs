@@ -43,6 +43,7 @@
 #![expect(clippy::single_call_fn, reason = "Intentional")]
 #![expect(clippy::little_endian_bytes, reason = "Intentional")]
 #![feature(stmt_expr_attributes)]
+#![feature(exposed_provenance)]
 
 mod gpio;
 mod uart;

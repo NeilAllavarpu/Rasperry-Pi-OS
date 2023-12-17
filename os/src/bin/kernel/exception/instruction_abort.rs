@@ -1,13 +1,11 @@
 //! Instruction abort specific handling
 
-use crate::impl_u32;
 use bitfield_struct::bitfield;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use macros::AsBits;
 
 /// The reason why the data abort was raised
-#[derive(FromPrimitive, ToPrimitive, Debug)]
-#[expect(clippy::missing_docs_in_private_items)]
+#[derive(AsBits, Debug)]
+#[repr(u32)]
 enum InstructionFaultStatusCode {
     AddressSizeFault = 0b0000,
     TranslationFault = 0b0001,
@@ -17,7 +15,6 @@ enum InstructionFaultStatusCode {
     /// table
     SynchronousExternalAbort = 0b0101,
     AlignmentFault = 0b1000,
-    Other,
 }
 
 /// The instruction syndrome whenever a Data Abort is taken
@@ -80,7 +77,8 @@ pub struct InstructionAbortIS {
 }
 
 impl InstructionAbortIS {
-    fn faulting_address(&self) -> Option<usize> {
+    /// Gets the faulting address for an instruction abort, if valid
+    fn faulting_address(self) -> Option<usize> {
         (!self.far_not_valid()).then(|| {
             let far: usize;
             // SAFETY: This touches nothing but a read to FAR_EL1, safely
@@ -103,5 +101,3 @@ pub fn handle(iss: InstructionAbortIS) -> i64 {
         iss.faulting_address()
     )
 }
-
-impl_u32!(InstructionFaultStatusCode);

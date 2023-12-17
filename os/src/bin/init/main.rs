@@ -2,7 +2,7 @@
 #![no_std]
 #![feature(naked_functions)]
 #![feature(asm_const)]
-use core::alloc::GlobalAlloc;
+use core::{alloc::GlobalAlloc, mem};
 
 use stdos::os::syscalls;
 
@@ -16,7 +16,7 @@ const INIT_TABLE_ENTRY_BASE: u64 = (1 << 53) // Privileged execute-never
 #[no_mangle]
 #[link_section = ".init"]
 #[naked]
-extern "C" fn _start() -> ! {
+extern "C" fn _start() {
     unsafe {
         core::arch::asm! {
             // Allocate a new page for the next stage ELF
@@ -61,11 +61,11 @@ extern "C" fn _start() -> ! {
 struct NoUse {}
 
 unsafe impl GlobalAlloc for NoUse {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+    unsafe fn alloc(&self, _: core::alloc::Layout) -> *mut u8 {
         unreachable!()
     }
 
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+    unsafe fn dealloc(&self, _: *mut u8, _: core::alloc::Layout) {
         unreachable!()
     }
 }
@@ -83,7 +83,10 @@ unsafe extern "C" fn main(next_part: *mut usize, next_len: u16) -> ! {
 
     // SAFETY: The caller promises that the arguments refer to a valid ELF, padding included
     let elf = unsafe {
-        core::slice::from_raw_parts(next_part, usize::try_from(next_len).unwrap().div_ceil(8))
+        core::slice::from_raw_parts(
+            next_part,
+            usize::from(next_len).div_ceil(mem::size_of::<usize>()),
+        )
     };
     // alloc a new PD
     // elf load into it

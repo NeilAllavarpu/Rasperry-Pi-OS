@@ -3,8 +3,6 @@
 //! See <https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface> for more
 //! information
 use bitfield_struct::bitfield;
-use core::arch::aarch64;
-use core::arch::aarch64::__dmb;
 use core::arch::aarch64::OSHST;
 use core::arch::asm;
 use core::mem;
@@ -271,7 +269,7 @@ impl Mailbox<'_> {
         unsafe { core::arch::aarch64::__dmb(OSHST) }
 
         // Wait for the mailbox to be available
-        while self.registers.status.matches_any(STATUS::FULL::Full) {
+        while self.registers.status.matches_any(&[STATUS::FULL::Full]) {
             core::hint::spin_loop();
         }
 
@@ -285,7 +283,7 @@ impl Mailbox<'_> {
             .write(DATA::DATA.val(buffer_addr >> 4) + DATA::CHANNEL::PropertyTagsToVc);
 
         // Wait for a responnse to be ready
-        while self.registers.status.matches_any(STATUS::EMPTY::Empty) {
+        while self.registers.status.matches_any(&[STATUS::EMPTY::Empty]) {
             core::hint::spin_loop();
         }
 

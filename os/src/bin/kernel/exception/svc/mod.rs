@@ -1,18 +1,19 @@
-//! System call handler
-use core::{arch::asm, fmt::Write};
+//! System call handlers
+
+use core::{ptr, slice};
 
 use bitfield_struct::bitfield;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use macros::AsBits;
 
-use crate::{impl_u32, memory::PAGE_ALLOCATOR, println, UART};
+use crate::{memory::PAGE_ALLOCATOR, UART};
 
-#[derive(FromPrimitive, ToPrimitive, Debug)]
+#[derive(AsBits, Debug)]
+#[repr(u32)]
+/// The SVC code for a specific system call
 enum CallCode {
     Print = 0x1000,
     Exit = 0x2000,
     AllocPage = 0x3000,
-    Other,
 }
 
 #[bitfield(u32)]
@@ -23,32 +24,31 @@ pub struct SvcIS {
 }
 
 #[repr(C)]
-pub struct SvcReturn {
+/// Return values for system calls, to be stored into registers
+pub struct Return {
+    /// Whether or not the system call was successful
     is_success: bool,
-    values: (usize),
+    /// Any relevant value returned from the syscall
+    value: usize,
 }
 
-impl From<SvcReturn> for (usize, usize) {
-    fn from(value: SvcReturn) -> Self {
-        (usize::from(value.is_success), value.values)
-    }
-}
-
+/// Creates the appropriate return value for a system call, given a success condition and any values
 macro_rules! ret {
     ($is_success:expr) => {{
-        SvcReturn {
+        Return {
             is_success: $is_success,
-            values: Default::default(),
+            value: Default::default(),
         }
     }};
     ($is_success:expr, $val:expr) => {{
-        SvcReturn {
+        Return {
             is_success: $is_success,
-            values: $val,
+            value: $val,
         }
     }};
 }
 
+/// Creates a successful system call return value
 macro_rules! success {
     () => {
         ret!(true)
@@ -58,6 +58,7 @@ macro_rules! success {
     };
 }
 
+/// Creates a failure system call return value
 macro_rules! fail {
     () => {
         ret!(false)
@@ -68,17 +69,20 @@ macro_rules! fail {
 }
 
 /// The general system call handler; dispatches to more specific handlers in other files
-pub extern "C" fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> SvcReturn {
+pub extern "C" fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> Return {
     match iss.code() {
         CallCode::Exit => {
             todo!("Implement program exits")
         }
         CallCode::Print => {
-            let data_ptr = core::ptr::from_exposed_addr(usize::try_from(arg0).unwrap());
-            let data_len = usize::try_from(arg1).unwrap();
+            let data_ptr = ptr::from_exposed_addr(
+                usize::try_from(arg0).expect("usizes and u64s should be interchangeable"),
+            );
+            let data_len =
+                usize::try_from(arg1).expect("usizes and u64s should be interchangeable");
             // TODO: actually validate pointers
             // SAFETY: If the user is nice...
-            let data_bytes = unsafe { core::slice::from_raw_parts(data_ptr, data_len) };
+            let data_bytes = unsafe { slice::from_raw_parts(data_ptr, data_len) };
             let uart = UART.get().expect("UART should be initialized by now");
             uart.lock()
                 .write_bytes(data_bytes)
@@ -86,18 +90,17 @@ pub extern "C" fn handle(iss: SvcIS, arg0: u64, arg1: u64) -> SvcReturn {
             success!()
         }
         CallCode::AllocPage => {
-            if let Some(result) = PAGE_ALLOCATOR.get().unwrap().alloc() {
+            if let Some(result) = PAGE_ALLOCATOR
+                .get()
+                .expect("Page allocator should be initialized")
+                .alloc()
+            {
                 // TODO: store this page for the process
-                success!(result.addr() as usize)
+                success!(usize::try_from(result.addr())
+                    .expect("Page addresses should always fit into a `usize`"))
             } else {
                 fail!()
             }
         }
-        CallCode::Other => {
-            println!("WARNING: Unhandled system call 0x{}", u32::from(iss));
-            fail!()
-        }
     }
 }
-
-impl_u32!(CallCode);

@@ -117,7 +117,7 @@ impl RegionAllocator {
     unsafe fn new(
         start: u64,
         size: u64,
-        reserved: impl Iterator<Item = &(u64, u64)>,
+        reserved: impl Iterator<Item = (u64, u64)>,
     ) -> Option<Self> {
         if size % PAGE_SIZE != 0 || start % PAGE_SIZE != 0 || start.checked_add(size).is_none() {
             None
@@ -131,7 +131,7 @@ impl RegionAllocator {
                     .take(num_pages)
                     .collect(),
             };
-            for &(start, size) in reserved {
+            for (start, size) in reserved {
                 println!("start {start} size {size}");
                 for page in (start
                     ..start
@@ -300,12 +300,12 @@ impl PageAllocator {
     /// The regions must be nonoverlapping, and reserved for memory allocations via this allocator solely.
     /// It may not be accessed through any other means.
     unsafe fn new(
-        ranges: impl Iterator<Item = &(u64, u64)>,
-        reserved: &(impl Iterator<Item = &(u64, u64)> + Clone),
+        ranges: impl Iterator<Item = (u64, u64)>,
+        reserved: &(impl Iterator<Item = (u64, u64)> + Clone),
     ) -> Option<Self> {
         ranges
             .into_iter()
-            .map(|&(start, size)| unsafe { RegionAllocator::new(start, size, reserved.clone()) })
+            .map(|(start, size)| unsafe { RegionAllocator::new(start, size, reserved.clone()) })
             .try_collect()
             .map(|regions| Self { regions })
     }
@@ -362,8 +362,14 @@ pub static PAGE_ALLOCATOR: OnceLock<PageAllocator> = OnceLock::new();
 /// The regions must be nonoverlapping, and reserved for memory allocations via this allocator solely.
 /// It may not be accessed through any other means.
 pub unsafe fn init(
-    ranges: impl Iterator<Item = &(u64, u64)>,
-    reserved: &(impl Iterator<Item = &(u64, u64)> + Clone),
+    ranges: impl Iterator<Item = (u64, u64)>,
+    reserved: &(impl Iterator<Item = (u64, u64)> + Clone),
 ) {
-    PAGE_ALLOCATOR.set(unsafe { PageAllocator::new(ranges, reserved) }.unwrap());
+    // TODO: explicitly validate that memory regions don't overlap
+    assert!(
+        PAGE_ALLOCATOR
+            .set(unsafe { PageAllocator::new(ranges, reserved) }.unwrap())
+            .is_ok(),
+        "Page allocator should be initialized only once "
+    );
 }

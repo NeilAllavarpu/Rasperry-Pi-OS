@@ -1,13 +1,11 @@
 //! Data abort specific handling
 
-use crate::impl_u32;
 use bitfield_struct::bitfield;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use macros::AsBits;
 
 /// The reason why the data abort was raised
-#[derive(FromPrimitive, ToPrimitive, Debug)]
-#[expect(clippy::missing_docs_in_private_items)]
+#[derive(AsBits, Debug)]
+#[repr(u32)]
 enum DataFaultStatusCode {
     AddressSizeFault = 0b0000,
     TranslationFault = 0b0001,
@@ -17,10 +15,10 @@ enum DataFaultStatusCode {
     /// table
     SynchronousExternalAbort = 0b0101,
     AlignmentFault = 0b1000,
-    Other,
 }
 
-#[derive(FromPrimitive, ToPrimitive, Debug)]
+#[derive(AsBits, Debug)]
+#[repr(u32)]
 /// Used when a Translation fault, Access flag fault, or Permission fault generates a Data Abort.
 enum LoadStoreType {
     /// The instruction that generated the Data Abort is not specified.
@@ -31,19 +29,20 @@ enum LoadStoreType {
     LdSt64B = 0b10,
     /// (FEAT_LS64_ACCDATA) An `ST64BV0` instruction generated the Data Abort.
     St64Bv0 = 0b11,
-    /// Should never occur
-    Other,
 }
 
 /// Indicates the size of the access attempted by the faulting operation
-#[derive(FromPrimitive, ToPrimitive, Debug)]
-#[expect(clippy::missing_docs_in_private_items)]
+#[derive(AsBits, Debug)]
+#[repr(u16)]
 enum AccessSize {
+    /// Access was a single byte
     Byte = 0b00,
+    /// Access was a halfword (two bytes)
     Halfword = 0b01,
+    /// Access was a word (4 bytes)
     Word = 0b10,
+    /// Access was a doubleword (8 bytes)
     Doubleword = 0b11,
-    Other,
 }
 
 /// The instruction syndrome whenever a Data Abort is taken
@@ -135,7 +134,3 @@ pub fn handle(iss: DataAbortIS) -> i64 {
     };
     panic!("Faulting address {far:X}, ISS {iss:X?}")
 }
-
-impl_u32!(DataFaultStatusCode);
-impl_u32!(LoadStoreType);
-impl_u32!(AccessSize);

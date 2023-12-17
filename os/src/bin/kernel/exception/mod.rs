@@ -4,10 +4,9 @@ use crate::println;
 use bitfield_struct::bitfield;
 use core::arch::{asm, global_asm};
 use core::fmt;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use macros::AsBits;
 
-use svc::SvcReturn;
+use svc::Return;
 
 mod data_abort;
 mod gic;
@@ -15,7 +14,8 @@ mod instruction_abort;
 mod svc;
 
 /// Indicates the reason for the exception that `ESR_EL1` holds information about
-#[derive(FromPrimitive, ToPrimitive, Debug)]
+#[derive(AsBits, Debug)]
+#[repr(u64)]
 enum ExceptionClass {
     /// Unknown reason
     Unknown = 0b000_000,
@@ -134,14 +134,12 @@ enum ExceptionClass {
     BkptAarch32 = 0b111_000,
     /// (AArch64) `BRK` instruction execution in AArch64 state.
     BrkAarch64 = 0b111_100,
-    /// Should never occur
-    Other,
 }
 
 /// Instruction Length for synchronous exceptions
-#[derive(FromPrimitive, ToPrimitive, Debug)]
+#[derive(AsBits, Debug)]
+#[repr(u64)]
 enum InstructionLength {
-    /// 16 bit instruction trapped
     Bit16 = 0,
     /// 32-bit instruction trapped. This value is also used when the exception is one of the following:
     /// * An SError interrupt
@@ -153,9 +151,15 @@ enum InstructionLength {
     /// * Any debug exception except for Breakpoint instruction exceptions
     /// * An exception reported using `Unknown`
     Bit32 = 1,
-    /// Should never occur
-    Other,
 }
+
+// primitive_enum! {
+//     InstructionLength, u32,
+//     /// 16 bit instruction trapped
+//     Bit16 = 0,
+//     /// 16 bit instruction trapped
+//     Bit32 = 1,
+// }
 
 /// Encodes the various possible instruction syndromes as an enum
 #[repr(C)]
@@ -167,6 +171,15 @@ union InstructionSyndrome {
     svc: svc::SvcIS,
     /// Raw bits for the instruction syndrome. Only the lower 25 bits are meaningful
     raw: u32,
+}
+
+impl InstructionSyndrome {
+    const fn into_bits(self) -> u64 {
+        (unsafe { self.raw }) as u64
+    }
+    const fn from_bits(value: u64) -> Self {
+        Self { raw: value as u32 }
+    }
 }
 
 #[bitfield(u64)]
@@ -184,7 +197,7 @@ struct ExceptionSyndrome {
 }
 
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
-extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> SvcReturn {
+extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> Return {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -229,7 +242,6 @@ extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> SvcReturn {
         | ExceptionClass::InstructionAbortEl1 => {
             unreachable!("EL1 exception should not reach the EL0 handler")
         }
-        ExceptionClass::Other => unreachable!("Undefined ESR for exception: {:X}", u64::from(esr)),
         _ => todo!("Handle {:X?}", esr),
     }
 }
@@ -337,40 +349,32 @@ impl From<InstructionSyndrome> for u64 {
     }
 }
 
-/// Implements conversion to and from a `u32` for a bitfield enum
-#[macro_export]
-macro_rules! impl_u32 {
-    ($type: ty) => {
-        impl From<u32> for $type {
-            fn from(value: u32) -> Self {
-                return Self::from_u32(value).unwrap_or(Self::Other);
-            }
-        }
+// /// Implements conversion to and from a `u32` for a bitfield enum
+// #[macro_export]
+// macro_rules! impl_u32 {
+//     ($type: ty) => {
+//         impl $type {
+//             const fn into_bits(self) -> u32 {
+//                 self as _
+//             }
+//             const fn from_bits(value: u32) -> Self {
+//                 Self::from_u32(value).unwrap_or(Self::Other)
+//             }
+//         }
+//     };
+// }
 
-        impl From<$type> for u32 {
-            fn from(value: $type) -> Self {
-                return value.to_u32().unwrap();
-            }
-        }
-    };
-}
-
-/// Implements conversion to and from a `u64` for a bitfield enum
-macro_rules! impl_u64 {
-    ($type: ty) => {
-        impl From<u64> for $type {
-            fn from(value: u64) -> Self {
-                return Self::from_u64(value).unwrap_or(Self::Other);
-            }
-        }
-
-        impl From<$type> for u64 {
-            fn from(value: $type) -> Self {
-                return value.to_u64().unwrap();
-            }
-        }
-    };
-}
-
-impl_u64!(ExceptionClass);
-impl_u64!(InstructionLength);
+// /// Implements conversion to and from a `u64` for a bitfield enum
+// macro_rules! impl_u64 {
+//     ($type: ty) => {
+//         impl $type {
+//             const fn into_bits(self) -> u64 {
+//                 self as _
+//             }
+//             const fn from_bits(value: u64) -> Self {
+//                 value.try_into().unwrap()
+//                 //               Self::from_u64(value).unwrap_or(Self::Other)
+//             }
+//         }
+//     };
+// }

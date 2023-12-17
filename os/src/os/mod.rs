@@ -1,11 +1,11 @@
 mod exception;
 pub mod syscalls;
-pub mod vm;
+// pub mod vm;
 
 use crate::sync::SpinLock;
 use core::arch::asm;
 use core::ptr::NonNull;
-use vm::AddressSpace;
+// use vm::AddressSpace;
 /*
 /// The entry point of a program. Maps a stack for itself and then hands control off to Rust
 /// initialization code
@@ -62,27 +62,27 @@ extern "C" fn _start(ttbr0_virtual: *mut ()) -> ! {
     }
 }
 */
-/// Performs initialization functions, and then hands off execution to `main`
-extern "C" fn wrapper(ttbr0_virtual: *mut ()) -> ! {
-    extern "C" {
-        fn main();
-    }
+// Performs initialization functions, and then hands off execution to `main`
+// extern "C" fn wrapper(ttbr0_virtual: *mut ()) -> ! {
+//     extern "C" {
+//         fn main();
+//     }
 
-    /// Page size, in bytes
-    const PAGE_SIZE: usize = 1 << 16;
-    assert!(
-        ttbr0_virtual.is_aligned_to(0x1000),
-        "Received an unaligned page table"
-    );
-    // SAFETY: It is up to the caller to guarantee that this is a valid table address
-    let address_space: AddressSpace<16, 25> = unsafe {
-        #[allow(clippy::expect_used)]
-        AddressSpace::new(NonNull::new(ttbr0_virtual).expect("Received a null page table"))
-    };
-    // SAFETY: No one else can access this address space yet, and will not be able to do so until
-    // `main` is called
-    // unsafe { vm::ADDRESS_SPACE.set(SpinLock::new(address_space)) };
-    // SAFETY: It is up to the application to properly define `main`
-    unsafe { main() };
-    todo!("Handle process cleanup and exit");
-}
+//     /// Page size, in bytes
+//     const PAGE_SIZE: usize = 1 << 16;
+//     assert!(
+//         ttbr0_virtual.is_aligned_to(0x1000),
+//         "Received an unaligned page table"
+//     );
+//     // SAFETY: It is up to the caller to guarantee that this is a valid table address
+//     let address_space: AddressSpace<16, 25> = unsafe {
+//         #[allow(clippy::expect_used)]
+//         AddressSpace::new(NonNull::new(ttbr0_virtual).expect("Received a null page table"))
+//     };
+//     // SAFETY: No one else can access this address space yet, and will not be able to do so until
+//     // `main` is called
+//     // unsafe { vm::ADDRESS_SPACE.set(SpinLock::new(address_space)) };
+//     // SAFETY: It is up to the application to properly define `main`
+//     unsafe { main() };
+//     todo!("Handle process cleanup and exit");
+// }

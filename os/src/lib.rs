@@ -68,13 +68,11 @@
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]
-#![feature(pointer_byte_offsets)]
-#![feature(ptr_from_ref)]
 #![feature(ptr_mask)]
 #![feature(unchecked_math)]
 #![feature(unchecked_shifts)]
 
 pub mod cell;
-pub mod heap;
+// pub mod heap;
 pub mod os;
 pub mod sync;
