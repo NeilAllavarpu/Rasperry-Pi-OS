@@ -68,6 +68,7 @@ core::arch::global_asm! {
     "str x3, [x4]",
 
     // Zero BSS
+    "adr x2, __bss_start",
     "adr x3, __bss_end",
     "0: strb wzr, [x2], 1",
     "cmp x2, x3",
@@ -91,6 +92,17 @@ core::arch::global_asm! {
     "ldr x4, =0x4C0040000", // gicc
     "orr x4, x3, x4",
     "str x4, [x2]",
+
+    "dmb ishst",
+
+    "adr x2, _start_per_core",
+    "mov x3, 0xE0",
+    "str x2, [x3]",
+    "str x2, [x3, 8]",
+    "str x2, [x3, 16]",
+    "dsb ishst",
+    "isb",
+    "sev",
 
     ".global _start_per_core",
     "_start_per_core: msr DAIFSET, 0b1111",

@@ -348,33 +348,3 @@ impl From<InstructionSyndrome> for u64 {
         unsafe { value.raw }.into()
     }
 }
-
-// /// Implements conversion to and from a `u32` for a bitfield enum
-// #[macro_export]
-// macro_rules! impl_u32 {
-//     ($type: ty) => {
-//         impl $type {
-//             const fn into_bits(self) -> u32 {
-//                 self as _
-//             }
-//             const fn from_bits(value: u32) -> Self {
-//                 Self::from_u32(value).unwrap_or(Self::Other)
-//             }
-//         }
-//     };
-// }
-
-// /// Implements conversion to and from a `u64` for a bitfield enum
-// macro_rules! impl_u64 {
-//     ($type: ty) => {
-//         impl $type {
-//             const fn into_bits(self) -> u64 {
-//                 self as _
-//             }
-//             const fn from_bits(value: u64) -> Self {
-//                 value.try_into().unwrap()
-//                 //               Self::from_u64(value).unwrap_or(Self::Other)
-//             }
-//         }
-//     };
-// }

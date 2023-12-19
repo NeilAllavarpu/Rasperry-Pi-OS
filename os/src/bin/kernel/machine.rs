@@ -31,7 +31,7 @@ pub fn core_id() -> u8 {
         asm! {
             "mrs {}, MPIDR_EL1",
             out(reg) mpidr_el1,
-            options(nomem, nostack, pure, preserves_flags),
+            options(nomem, nostack, preserves_flags),
         }
     }
     u8::try_from(mpidr_el1 & 0b11).expect("Core ID should fit into a u8")
