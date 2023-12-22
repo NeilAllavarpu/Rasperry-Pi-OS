@@ -3,13 +3,12 @@ use core::sync::atomic::{AtomicU16, Ordering};
 use core::{iter, mem};
 use stdos::cell::OnceLock;
 
-use crate::println;
-
 pub type ProcessCount = u16;
 pub type AtomicProcessCount = AtomicU16;
 const PROCESS_COUNT_BITS: u32 = mem::size_of::<ProcessCount>() as u32;
 // .expect("Process count size should be a small number of bits");
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct PhysicalPage(u64);
 
 impl PhysicalPage {
@@ -21,33 +20,6 @@ impl PhysicalPage {
     pub fn to_owned(self) -> Self {
         PAGE_ALLOCATOR.get().unwrap().to_owned(self)
     }
-
-    // const UNALLOCATED: Self = Self(AtomicU32::new(0));
-
-    // fn fetch_update(
-    //     &self,
-    //     mut f: impl FnMut(ProcessCount, ProcessCount) -> Option<(ProcessCount, ProcessCount)>,
-    // ) -> bool {
-    //     self.0
-    //         .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
-    //             let readers = (value & ((1 << PROCESS_COUNT_BITS) - 1))
-    //                 .try_into()
-    //                 .expect("Top 16 bits should be the writer value");
-
-    //             let writers = value
-    //                 .checked_shr(PROCESS_COUNT_BITS)
-    //                 .and_then(|value| value.try_into().ok())
-    //                 .expect("Top 16 bits should be the writer value");
-
-    //             f(readers, writers).map(|(readers, writers)| {
-    //                 u32::from(writers)
-    //                     .checked_shl(PROCESS_COUNT_BITS)
-    //                     .expect("Top 16 bits should be the writer value")
-    //                     | u32::from(readers)
-    //             })
-    //         })
-    //         .is_ok()
-    // }
 }
 
 impl Clone for PhysicalPage {
@@ -63,31 +35,7 @@ impl Drop for PhysicalPage {
     }
 }
 
-// impl From<u32> for PhysicalPage {
-//     fn from(value: u32) -> Self {
-//         Self {
-//             writers: value
-//                 .checked_shr(PROCESS_COUNT_BITS)
-//                 .and_then(|value| value.try_into().ok())
-//                 .expect("Top 16 bits should be the writer value"),
-
-//             readers: (value & ((1 << PROCESS_COUNT_BITS) - 1))
-//                 .try_into()
-//                 .expect("Top 16 bits should be the writer value"),
-//         }
-//     }
-// }
-
-// impl From<PhysicalPage> for u32 {
-//     fn from(value: PhysicalPage) -> Self {
-//         u32::from(value.writers)
-//             .checked_shl(PROCESS_COUNT_BITS)
-//             .expect("Top 16 bits should be the writer value")
-//             | u32::from(value.readers)
-//     }
-// }
-
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WriteablePage(PhysicalPage);
 
 impl WriteablePage {
@@ -101,8 +49,14 @@ impl WriteablePage {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReadablePage(PhysicalPage);
+
+impl ReadablePage {
+    pub fn addr(&self) -> u64 {
+        self.0 .0
+    }
+}
 
 struct RegionAllocator {
     start: u64,
@@ -132,7 +86,6 @@ impl RegionAllocator {
                     .collect(),
             };
             for (start, size) in reserved {
-                println!("start {start} size {size}");
                 for page in (start
                     ..start
                         .checked_add(size)
@@ -152,7 +105,6 @@ impl RegionAllocator {
             .map(|page_refcount| {
                 page_refcount
                     .fetch_update(Ordering::Release, Ordering::Acquire, |refcount| {
-                        println!("setting {page:X} to 1");
                         assert_eq!(refcount, 0);
                         Some(1)
                     })

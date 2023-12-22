@@ -253,6 +253,7 @@ core::arch::global_asm! {
         | (0b11 << 12) // Inner-shareable memory for page walks
         | (0b11 << 10) // Outer-cacheable memory for page walks
         | (0b11 << 8) // Inner-cacheable memory for page walks
+        | (1    << 7) // Disable EL0 automatic page walks
         | (64 - (ADDRESS_BITS as u64)) // EL0 virtual address bits
     ),
     TRANSLATION_TABLE = sym TRANSLATION_TABLE,

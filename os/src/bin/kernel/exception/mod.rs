@@ -11,6 +11,7 @@ use svc::Return;
 mod data_abort;
 mod gic;
 mod instruction_abort;
+pub mod page_fault;
 mod svc;
 
 /// Indicates the reason for the exception that `ESR_EL1` holds information about
@@ -197,7 +198,8 @@ struct ExceptionSyndrome {
 }
 
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
-extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> Return {
+/// Does **not** include `SVC`s
+extern "C" fn synchronous_exception_from_el0() {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -213,32 +215,24 @@ extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> Return {
 
     #[expect(clippy::wildcard_enum_match_arm)]
     match esr.exception_class() {
-        ExceptionClass::DataAbortEL0 => {
+        ExceptionClass::DataAbortEL0 | ExceptionClass::DataAbortEL1 => {
             data_abort::handle(
                 // SAFETY: This is the correct ISS and set validly
                 unsafe { iss.data_abort },
             );
-            unreachable!()
         }
         ExceptionClass::SvcAArch64 => {
-            svc::handle(
-                // SAFETY: This is the correct ISS and set validly
-                unsafe { iss.svc },
-                x0,
-                x1,
-            )
+            unreachable!()
         }
         ExceptionClass::InstructionAbortEL0 => {
             instruction_abort::handle(
                 // SAFETY: This is the correct ISS and set validly
                 unsafe { iss.instruction_abort },
             );
-            unreachable!()
         }
         ExceptionClass::BreakpointEL1
         | ExceptionClass::SoftwareStepEL1
         | ExceptionClass::WatchpointEL1
-        | ExceptionClass::DataAbortEL1
         | ExceptionClass::InstructionAbortEl1 => {
             unreachable!("EL1 exception should not reach the EL0 handler")
         }
@@ -249,12 +243,13 @@ extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) -> Return {
 global_asm!(
     include_str!("./exception.s"),
     from_sp_el0 = sym exception_from_sp_el0,
-    synchronous_from_el1 = sym synchronous_exception_from_el1,
     irq = sym irq_exception,
     fiq = sym fiq_exception,
     serror = sym serror_exception,
-    synchronous_from_el0 = sym synchronous_exception_from_el0,
+    synchronous = sym synchronous_exception_from_el0,
+    SVC_CODE = const ExceptionClass::SvcAArch64 as u64,
     aarch32 = sym exception_aarch32,
+    svc = sym svc::handle,
 );
 
 /// Sets up exception handling on the current core
@@ -313,11 +308,6 @@ extern "C" fn serror_exception() -> ! {
 /// Handles any `AArch32` exceptions should any be erroneously triggered
 extern "C" fn exception_aarch32() -> ! {
     unimplemented!("AArch32 execution is not currently supported");
-}
-
-/// Handles any synchronous exceptions from the kernel should any be erroneously triggered
-extern "C" fn synchronous_exception_from_el1() -> ! {
-    unreachable!("Synchronous exceptions from EL1 should never occur");
 }
 
 impl fmt::Debug for InstructionSyndrome {

@@ -1,11 +1,11 @@
 [build]
-target = "aarch64-unknown-none"
+target = "aarch64-unknown-none-softfloat"
 rustflags = [
-#  "-Ccode-model=tiny",
-#  "-Clink-args=-O3 --optimize-bb-jumps -gc-sections --demangle",
+   "-Ccode-model=tiny",
+   "-Clink-args=-O3 --optimize-bb-jumps -gc-sections --demangle",
    "-Ctarget-cpu=cortex-a72",
-#  "-Cforce-frame-pointers=false",
-#   "-Cforce-unwind-tables=false",
+   "-Cforce-frame-pointers=false",
+   "-Cforce-unwind-tables=false",
    "-Clinker-plugin-lto=true",
 #  "--emit=obj"
 ]
@@ -16,7 +16,7 @@ panic = "abort"
 [profile.release]
 opt-level = "z"
 # lto = true
-codegen-units = 16
+codegen-units = 128
 panic = "abort"
 
 [unstable]

@@ -48,11 +48,11 @@ pub fn as_bits(input: TokenStream) -> TokenStream {
 
     quote! {
         impl #enum_name {
-            const fn into_bits(self) -> #repr_size {
+            pub const fn into_bits(self) -> #repr_size {
                 self as _
             }
 
-            const fn from_bits(value: #repr_size) -> Self {
+            pub const fn from_bits(value: #repr_size) -> Self {
                 match value {
                     #(#arms)*
                     _ => panic!("Unexpected value for enum")

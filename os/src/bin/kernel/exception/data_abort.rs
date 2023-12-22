@@ -1,7 +1,16 @@
 //! Data abort specific handling
 
+use crate::println;
+
 use bitfield_struct::bitfield;
 use macros::AsBits;
+
+use crate::{
+    exception::page_fault::{AccessType, StatusCode},
+    machine::{self, faulting_address},
+};
+
+use super::page_fault::{self, PageFaultInfo};
 
 /// The reason why the data abort was raised
 #[derive(AsBits, Debug)]
@@ -53,7 +62,7 @@ pub struct DataAbortIS {
     level: u8,
     /// Status code indicating the cause of the data abort
     #[bits(4)]
-    status_code: DataFaultStatusCode,
+    status_code: StatusCode,
     /// Write not Read. Indicates whether a synchronous abort was caused by an instruction writing to a memory location, or by an instruction reading from a memory location
     ///
     /// For faults on cache maintenance and address translation instructions, this bit always
@@ -121,16 +130,25 @@ pub struct DataAbortIS {
     __: u8,
 }
 
+impl DataAbortIS {
+    /// Gets the faulting address for an instruction abort, if valid
+    fn faulting_address(self) -> Option<u64> {
+        (!self.far_not_valid()).then(machine::faulting_address)
+    }
+}
 /// Handles a data abort
-pub fn handle(iss: DataAbortIS) -> i64 {
-    let far: u64;
-    // SAFETY: This touches nothing but a read to FAR_EL1, safely
-    unsafe {
-        core::arch::asm! {
-            "mrs {}, FAR_EL1",
-            out(reg) far,
-            options(nomem, nostack, preserves_flags)
-        };
-    };
-    panic!("Faulting address {far:X}, ISS {iss:X?}")
+pub fn handle(iss: DataAbortIS) {
+    println!("iss {:X?} far {:X}", iss, faulting_address());
+    // assert!(iss.instruction_syndrome_valid());
+    page_fault::resolve_page_fault(&PageFaultInfo {
+        access_type: if iss.was_write() {
+            AccessType::Store
+        } else {
+            AccessType::Load
+        },
+        code: iss.status_code(),
+        level: iss.level(),
+        faulting_address: iss.faulting_address(),
+        access_bytes: 1 << iss.access_size(),
+    });
 }

@@ -231,9 +231,10 @@ impl Mailbox<'_> {
     fn send<T>(&mut self, buffer: &mut T) -> bool {
         let virtual_addr = ptr::from_mut(buffer).addr();
 
-        let Some(physical_addr) = to_physical_addr(virtual_addr) else {
+        let Ok(physical_addr) = to_physical_addr(virtual_addr) else {
             return false;
         };
+        let physical_addr = physical_addr.pa();
         // Verify that the buffer's address fits into a `u32` and is aligned
         let Ok(buffer_addr) = u32::try_from(physical_addr) else {
             return false;

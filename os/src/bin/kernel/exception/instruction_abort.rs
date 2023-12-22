@@ -1,23 +1,13 @@
 //! Instruction abort specific handling
 
+use super::page_fault::StatusCode;
+use crate::{
+    exception::page_fault::{self, AccessType, PageFaultInfo},
+    machine,
+};
 use bitfield_struct::bitfield;
-use macros::AsBits;
 
-/// The reason why the data abort was raised
-#[derive(AsBits, Debug)]
-#[repr(u32)]
-enum InstructionFaultStatusCode {
-    AddressSizeFault = 0b0000,
-    TranslationFault = 0b0001,
-    AccessFlagFault = 0b0010,
-    PermissionFault = 0b0011,
-    /// Synchronous External abort on translation table walk or hardware update of translation
-    /// table
-    SynchronousExternalAbort = 0b0101,
-    AlignmentFault = 0b1000,
-}
-
-/// The instruction syndrome whenever a Data Abort is taken
+/// The instruction syndrome whenever an Instruction Abort is taken
 #[bitfield(u32)]
 pub struct InstructionAbortIS {
     /// Level of translation at which the data abort occurred. Not always meaningful.
@@ -25,7 +15,7 @@ pub struct InstructionAbortIS {
     level: u8,
     /// Status code indicating the cause of the data abort
     #[bits(4)]
-    status_code: InstructionFaultStatusCode,
+    status_code: StatusCode,
     _res0: bool,
     /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk:
     was_stage_2: bool,
@@ -78,26 +68,20 @@ pub struct InstructionAbortIS {
 
 impl InstructionAbortIS {
     /// Gets the faulting address for an instruction abort, if valid
-    fn faulting_address(self) -> Option<usize> {
-        (!self.far_not_valid()).then(|| {
-            let far: usize;
-            // SAFETY: This touches nothing but a read to FAR_EL1, safely
-            unsafe {
-                core::arch::asm! {
-                    "mrs {}, FAR_EL1",
-                    out(reg) far,
-                    options(nomem, nostack, preserves_flags)
-                };
-            };
-            far
-        })
+    fn faulting_address(self) -> Option<u64> {
+        (!self.far_not_valid()).then(machine::faulting_address)
     }
 }
 
-/// Handles a data abort
+/// Handles an instruciton abort
 pub fn handle(iss: InstructionAbortIS) -> i64 {
-    panic!(
-        "Faulting address {:X?}, ISS {iss:X?}",
-        iss.faulting_address()
-    )
+    // assert!(iss.instruction_syndrome_valid());
+    page_fault::resolve_page_fault(&PageFaultInfo {
+        access_type: AccessType::Instruction,
+        code: iss.status_code(),
+        level: iss.level(),
+        faulting_address: iss.faulting_address(),
+        access_bytes: 4,
+    });
+    unreachable!();
 }

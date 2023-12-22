@@ -2,7 +2,16 @@
 #![no_std]
 #![feature(naked_functions)]
 #![feature(asm_const)]
-use core::{alloc::GlobalAlloc, mem};
+#![feature(inline_const)]
+#![feature(generic_arg_infer)]
+#![feature(strict_provenance_atomic_ptr)]
+
+use core::{
+    alloc::GlobalAlloc,
+    fmt::Write,
+    mem,
+    sync::atomic::{AtomicPtr, AtomicU64},
+};
 
 use stdos::os::syscalls;
 
@@ -13,12 +22,31 @@ const INIT_TABLE_ENTRY_BASE: u64 = (1 << 53) // Privileged execute-never
 | (1    << 6)  // EL0 accessible
 |  0b11; // Valid entry
 
+struct UserContext {
+    exception_vector: extern "C" fn() -> !,
+    exception_stack: AtomicPtr<u64>,
+    exception_stack_mem: &'static [AtomicU64],
+}
+
+static CONTEXT: UserContext = UserContext {
+    exception_vector: exception_handler,
+    exception_stack: AtomicPtr::new(EXCEPTION_STACK[0].as_ptr()),
+    exception_stack_mem: &EXCEPTION_STACK,
+};
+
+static EXCEPTION_STACK: [AtomicU64; 8] = [const { AtomicU64::new(0) }; _];
+
 #[no_mangle]
 #[link_section = ".init"]
 #[naked]
 extern "C" fn _start() {
     unsafe {
         core::arch::asm! {
+            // Set the exception context
+            "adr x0, {user_context}", // User contet
+            "mov x1, xzr", // TTBR0_EL1, guaranteed to be 0
+            "mov x2, {TCR_EL1}", // TODO: actually make TCR_EL1 meaningful
+            "svc 0x4000",
             // Allocate a new page for the next stage ELF
             "svc 0x3000", // If the allocation fails, we're in trouble anyways, so don't bother error checking
             "ldr x0, ={TABLE_ENTRY_BASE}",
@@ -51,6 +79,8 @@ extern "C" fn _start() {
 
             "mov sp, 0x10000",
             "b {main}",
+            user_context = sym CONTEXT,
+            TCR_EL1 = const 0, // TODO
             main = sym main,
             TABLE_ENTRY_BASE = const INIT_TABLE_ENTRY_BASE,
             options(noreturn)
@@ -72,6 +102,14 @@ unsafe impl GlobalAlloc for NoUse {
 
 #[global_allocator]
 static D: NoUse = NoUse {};
+
+struct Stdout {}
+impl Write for Stdout {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        syscalls::write(s.as_bytes());
+        Ok(())
+    }
+}
 
 /// The entry point of the init program. Spawns all the other programs before exiting
 /// # Safety
@@ -98,6 +136,17 @@ unsafe extern "C" fn main(next_part: *mut usize, next_len: u16) -> ! {
     }
     syscalls::write("Unreachable!\n".as_bytes());
     syscalls::exit()
+}
+
+extern "C" fn exception_handler() -> ! {
+    let mut stdout = Stdout {};
+    writeln!(&mut stdout, "code: {}", unsafe {
+        *CONTEXT
+            .exception_stack
+            .load(core::sync::atomic::Ordering::Relaxed)
+            .sub(1)
+    });
+    todo!("Enforce returning")
 }
 
 #[panic_handler]

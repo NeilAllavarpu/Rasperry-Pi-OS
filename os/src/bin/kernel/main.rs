@@ -27,39 +27,32 @@
 #![expect(clippy::unimplemented)]
 #![expect(clippy::unreachable)]
 #![expect(clippy::expect_used)]
-#![expect(clippy::todo)]
-#![expect(clippy::panic)]
+#![expect(clippy::pub_with_shorthand)]
 #![feature(allocator_api)]
 #![feature(alloc_layout_extra)]
 #![feature(asm_const)]
-#![feature(btreemap_alloc)]
 #![feature(const_mut_refs)]
-#![feature(const_option)]
-#![feature(const_ptr_as_ref)]
-#![feature(ascii_char)]
 #![feature(exposed_provenance)]
 #![feature(generic_arg_infer)]
+#![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
-#![feature(maybe_uninit_array_assume_init)]
 #![feature(naked_functions)]
 #![feature(panic_info_message)]
 #![feature(pointer_is_aligned)]
 #![feature(slice_ptr_get)]
-#![feature(slice_take)]
 #![feature(stdsimd)]
 #![feature(stmt_expr_attributes)]
-#![feature(iterator_try_collect)]
-#![feature(let_chains)]
-#![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(strict_provenance)]
+#![feature(strict_provenance_atomic_ptr)]
 
 use alloc::sync::Arc;
 use bump_allocator::BumpAllocator;
+use core::arch::asm;
 use core::fmt::Write;
 use core::num::NonZeroUsize;
 use core::panic::PanicInfo;
-use core::ptr::{addr_of_mut, NonNull};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::ptr::{self, addr_of_mut, NonNull};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 use core::{hint, mem};
 use device_tree::dtb::DeviceTree;
 use stdos::cell::OnceLock;
@@ -78,7 +71,8 @@ use uart::Uart;
 extern crate alloc;
 
 use crate::boot::STACK_SIZE;
-use crate::execution::Execution;
+use crate::execution::{ExceptionCode, Execution, UserContext};
+use crate::memory::PAGE_ALLOCATOR;
 
 /// Physical address of the init program's top-level translation table
 const INIT_TRANSLATION_ADDRESS: u64 = 0x0;
@@ -114,6 +108,8 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
     /// Set only when the global initialization sequence (stuff that only runs once total) is
     /// finished
     static GLOBAL_SETUP_DONE: AtomicBool = AtomicBool::new(false);
+    static NUM_READY: AtomicU8 = AtomicU8::new(0);
+    NUM_READY.fetch_add(1, Ordering::Relaxed);
     if machine::core_id() == 0 {
         extern "C" {
             static mut __bss_end: u8;
@@ -200,24 +196,48 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
                         )
                     })
                 }),
-                &[(0x8_0000, 0x18_0000), (0, 0x1_0000)].iter().copied(),
+                &[(0x8_0000, 0x18_0000)].iter().copied(),
             );
         }
 
+        // TODO: better mechanism...
+        let page = PAGE_ALLOCATOR.get().unwrap().alloc().unwrap();
+        assert_eq!(page.addr(), 0);
+
         GLOBAL_SETUP_DONE.store(true, Ordering::Release);
 
-        execution::add_to_running(Arc::new(Execution::new(0x0, 0x1000)));
+        let ctx_ptr = ptr::from_exposed_addr_mut::<UserContext>(0x10);
+        let ctx_ptr2 = ctx_ptr.map_addr(|x| x | 0xFFFF_FFFF_FE00_0000_usize);
+        unsafe {
+            ctx_ptr2.write_volatile(UserContext {
+                exception_vector: AtomicUsize::new(0x1000),
+                exception_stack: AtomicPtr::new(0x20 as *mut _),
+            });
+        }
+
+        let tcr;
+        unsafe {
+            asm! {
+                "mrs {}, TCR_EL1",
+                out(reg) tcr
+            };
+        }
+
+        let init = Arc::new(Execution::new(tcr, 0x0, ctx_ptr));
+        init.add_writable_page(page);
+
+        let num_cores = device_tree.root().cpus().iter().count();
+        while usize::from(NUM_READY.load(Ordering::Relaxed)) != num_cores {
+            hint::spin_loop();
+        }
+
+        init.jump_into(ExceptionCode::Resumption, &[])
     } else {
         while !GLOBAL_SETUP_DONE.load(Ordering::Acquire) {
             hint::spin_loop();
         }
-        println!("WAITER");
-
-        loop {}
+        execution::idle_loop()
     }
-    println!("PREPARE");
-    // loop {}
-    execution::idle_loop()
 }
 
 /// Panics are unhandled error conditions - the entire system may be forced to shut down
