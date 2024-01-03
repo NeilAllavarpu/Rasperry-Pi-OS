@@ -1,35 +1,27 @@
-/// Executes a system call and coerces the return value into a `Result`
-macro_rules! svc {
-    ($code:expr, $success: ty, $fail: ty) => {{
-        let success: usize;
-        let value: usize;
-        unsafe {
-            core::arch::asm! {
-                concat!("svc ", $code),
-                options(nostack),
-                out("x0") success,
-                out("x1") value,
-                clobber_abi("C"),
-            }
+#[inline]
+#[must_use]
+pub fn alloc_page() -> Option<u64> {
+    let page: u64;
+    let status: u64;
+    unsafe {
+        core::arch::asm! {
+            "svc 0x3000",
+            out("x0") status,
+            out("x1") page,
+            options(nomem, nostack),
+            clobber_abi("C"),
         }
-        match success {
-            0 => Err(value),
-            1 => Ok(value),
-            _ => panic!(
-                "Syscall {} returned an invalid success/failure value",
-                $code
-            ),
-        }
-    }};
-}
-
-pub fn alloc_page(_page_size: u64) -> Result<u64, ()> {
-    Ok(0x80_0000)
+    };
+    match status {
+        0 => Some(page),
+        1 => None,
+        _ => unreachable!("Allocate page syscall returned an invalid success/failure value"),
+    }
 }
 
 #[inline]
 pub fn write(bytes: &[u8]) -> bool {
-    let status: usize;
+    let status: u64;
     unsafe {
         core::arch::asm! {
             "svc 0x1000",
@@ -48,15 +40,45 @@ pub fn write(bytes: &[u8]) -> bool {
 
 #[inline]
 pub fn exit() -> ! {
+    loop {
+        unsafe {
+            core::arch::asm! {
+                "svc 0x2000",
+                options(nostack, readonly),
+                clobber_abi("C"),
+            }
+        }
+    }
+}
+
+#[inline]
+pub fn exec(context: *mut (), ttbr0: u64, tcr_el1: u64) -> Result<!, ()> {
+    let status: u64;
     unsafe {
         core::arch::asm! {
-            "svc 0x1000",
+            "svc 0x4000",
+            inlateout("x0") context => status,
+            in("x1") ttbr0,
+            in("x2") tcr_el1,
+            options(nostack, readonly),
+            clobber_abi("C"),
+        }
+    };
+    match status {
+        0 => unreachable!("Exec should never return if successful"),
+        1 => Err(()),
+        _ => unreachable!("Exec syscall returned an invalid success/failure value"),
+    }
+}
+
+#[inline]
+pub fn eret() -> ! {
+    unsafe {
+        core::arch::asm! {
+            "svc 0x0",
             options(nostack, readonly),
             clobber_abi("C"),
         }
     }
-    // Should never reach here
-    loop {
-        core::hint::spin_loop()
-    }
+    unreachable!("`eret` should not fall through")
 }

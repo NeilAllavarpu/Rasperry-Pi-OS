@@ -7,7 +7,6 @@ rustflags = [
    "-Cforce-frame-pointers=false",
    "-Cforce-unwind-tables=false",
    "-Clinker-plugin-lto=true",
-#  "--emit=obj"
 ]
 
 [profile.dev]
@@ -15,7 +14,6 @@ panic = "abort"
 
 [profile.release]
 opt-level = "z"
-# lto = true
 codegen-units = 128
 panic = "abort"
 

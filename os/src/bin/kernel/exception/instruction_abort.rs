@@ -74,7 +74,7 @@ impl InstructionAbortIS {
 }
 
 /// Handles an instruciton abort
-pub fn handle(iss: InstructionAbortIS) -> i64 {
+pub fn handle(iss: InstructionAbortIS) {
     // assert!(iss.instruction_syndrome_valid());
     page_fault::resolve_page_fault(&PageFaultInfo {
         access_type: AccessType::Instruction,
@@ -82,6 +82,5 @@ pub fn handle(iss: InstructionAbortIS) -> i64 {
         level: iss.level(),
         faulting_address: iss.faulting_address(),
         access_bytes: 4,
-    });
-    unreachable!();
+    })
 }

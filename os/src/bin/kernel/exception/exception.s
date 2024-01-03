@@ -57,14 +57,16 @@ _exception_vector:
 .balign 0x80
     b {serror} // Can SErrors occur?
 // These are taken if we were in AArch64 EL0
-.balign 0x80 // Synchronous exception: only an SVC should be able to return, and it should have already formatted the registers accordingly
+.balign 0x80 // Synchronous exception
     // Save all registers that are not necessarily preserved by the C ABI
     // Calling the handler will preserve the remaining registers
     stp    x18, lr, [sp, #-0xA0]! // This also allocates stack space for the context
     mrs x18, ESR_EL1
-    lsr w18, w18, 26
-    cmp w18, {SVC_CODE}
+    lsr w30, w18, 26
+    cmp w30, {SVC_CODE}
     b.ne 0f
+    and w18, w18, 0xFFFF
+    cbz w18, 0f
     bl {svc}
     b 1f
     0: stp    x2, x3, [sp, #0x10]

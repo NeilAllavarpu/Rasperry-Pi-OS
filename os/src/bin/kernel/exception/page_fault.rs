@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Access type that caused the page fault
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(super) enum AccessType {
     /// Loads from memory
     Load,
@@ -33,6 +33,7 @@ pub(crate) enum StatusCode {
 }
 
 /// Information describing the source and cause of a page fault
+#[derive(Debug)]
 pub(super) struct PageFaultInfo {
     /// Memory access type that caused the page fault
     pub access_type: AccessType,
@@ -83,6 +84,7 @@ pub(super) fn resolve_page_fault(info: &PageFaultInfo) {
         }
     };
     if call_signal {
+        println!("Call signal handler!");
         current.jump_into(ExceptionCode::PageFault, &[])
     }
     // Else, the TLB refill is valid, so we can simply return to usermode

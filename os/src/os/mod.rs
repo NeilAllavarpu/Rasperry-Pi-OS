@@ -1,6 +1,6 @@
 mod exception;
 pub mod syscalls;
-// pub mod vm;
+pub mod vm;
 
 use crate::sync::SpinLock;
 use core::arch::asm;

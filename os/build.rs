@@ -36,7 +36,7 @@ fn main() -> Result<(), String> {
         "false" => {
             println!("cargo:rustc-link-arg-bin=kernel=--oformat=binary");
             println!("cargo:rustc-link-arg-bin=init=--oformat=binary");
-            println!("cargo:rustc-link-arg=--strip-all");
+            // println!("cargo:rustc-link-arg=--strip-all");
         }
         "true" => {}
         _ => unreachable!(),

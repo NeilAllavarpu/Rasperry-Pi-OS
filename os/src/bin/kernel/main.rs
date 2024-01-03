@@ -250,22 +250,17 @@ fn panic(info: &PanicInfo) -> ! {
     // Make sure that this doesn't overlap with other peripheral accesses
     if let Some(uart) = UART.get() {
         let mut uart = uart.lock();
-        write!(&mut uart, "PANIC occurred");
+        let core = machine::core_id();
+
+        write!(&mut uart, "core '{core}' panicked");
         if let Some(location) = info.location() {
-            write!(
-                &mut uart,
-                " (at {}:{}:{})",
-                location.file(),
-                location.line(),
-                location.column()
-            );
+            write!(&mut uart, " at {location}");
         }
-        if let Some(args) = info.message() {
-            write!(&mut uart, ": ");
-            uart.write_fmt(*args);
+        if let Some(&args) = info.message() {
+            writeln!(&mut uart, ":");
+            uart.write_fmt(args);
         }
         writeln!(&mut uart);
-        drop(uart);
     }
     loop {
         hint::spin_loop();

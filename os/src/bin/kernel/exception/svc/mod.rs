@@ -1,28 +1,34 @@
 //! System call handlers
 
-use core::{ptr, slice};
+use core::{arch::asm, ptr};
 
 use bitfield_struct::bitfield;
 use macros::AsBits;
 
-use crate::{execution, memory::PAGE_ALLOCATOR, println, UART};
+use crate::{
+    execution::{self, ContextError, ExceptionCode},
+    memory::PAGE_ALLOCATOR,
+    println, UART,
+};
 
 use super::ExceptionSyndrome;
 
 #[derive(AsBits, Debug)]
 #[repr(u32)]
 /// The SVC code for a specific system call
-enum CallCode {
+#[derive(PartialEq)]
+pub(super) enum CallCode {
     Print = 0x1000,
     Exit = 0x2000,
     AllocPage = 0x3000,
     SetInfo = 0x4000,
+    Eret = 0x0,
 }
 
 #[bitfield(u32)]
 pub struct SvcIS {
     #[bits(16)]
-    code: CallCode,
+    pub code: CallCode,
     __: u16,
 }
 
@@ -55,20 +61,20 @@ macro_rules! ret {
 /// Creates a successful system call return value
 macro_rules! success {
     () => {
-        ret!(true)
+        ret!(false)
     };
     ($val:expr) => {
-        ret!(true, $val)
+        ret!(false, $val)
     };
 }
 
 /// Creates a failure system call return value
 macro_rules! fail {
     () => {
-        ret!(false)
+        ret!(true)
     };
     ($val:expr) => {
-        ret!(false, $val)
+        ret!(true, $val)
     };
 }
 
@@ -81,8 +87,21 @@ enum SetContextFailure {
     MisalignedUserContext = 0b101,
 }
 
+pub fn eret_handle(x0: u64, x1: u64) {
+    let execution = execution::current()
+        .expect("Current execution should be set when receiving a syscall from usermode");
+    let return_address = execution.user_context().pop();
+    unsafe {
+        asm! {
+            "msr ELR_EL1, {}",
+            in(reg) return_address,
+            options(nomem, nostack, preserves_flags)
+        }
+    }
+}
+
 /// The general system call handler; dispatches to more specific handlers in other files
-pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
+pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
     let execution = execution::current()
         .expect("Current execution should be set when receiving a syscall from usermode");
     let esr: u64;
@@ -102,18 +121,17 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
             todo!("Implement program exits")
         }
         CallCode::Print => {
-            let data_ptr = ptr::from_exposed_addr(
+            let data_ptr: *const u8 = ptr::from_exposed_addr(
                 usize::try_from(arg0).expect("usizes and u64s should be interchangeable"),
             );
             let data_len =
                 usize::try_from(arg1).expect("usizes and u64s should be interchangeable");
             // TODO: actually validate pointers
-            // SAFETY: If the user is nice...
-            let data_bytes = unsafe { slice::from_raw_parts(data_ptr, data_len) };
             let uart = UART.get().expect("UART should be initialized by now");
-            uart.lock()
-                .write_bytes(data_bytes)
-                .expect("UART should not fail");
+            for offset in 0..data_len {
+                let byte = unsafe { data_ptr.byte_add(offset).read() };
+                uart.lock().write_byte(byte).expect("UART should not fail");
+            }
             success!()
         }
         CallCode::AllocPage => {
@@ -138,22 +156,24 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
                 arg1,
                 arg2,
             ) {
-                Ok(()) => success!(),
+                Ok(()) => {
+                    execution.jump_into(ExceptionCode::Resumption, &[]);
+                }
                 #[expect(clippy::as_conversions)]
                 Err(err) => fail!(match err {
-                    execution::ContextError::MisalignedTtbr0 => {
+                    ContextError::MisalignedTtbr0 => {
                         SetContextFailure::MisalignedTtbr0
                     }
-                    execution::ContextError::InaccessibleTtbr0 => {
+                    ContextError::InaccessibleTtbr0 => {
                         SetContextFailure::InaccessibleTtbr0
                     }
-                    execution::ContextError::InvalidTcrBits => {
+                    ContextError::InvalidTcrBits => {
                         SetContextFailure::InvalidTcrBits
                     }
-                    execution::ContextError::MisalignedUserContext => {
+                    ContextError::MisalignedUserContext => {
                         SetContextFailure::MisalignedUserContext
                     }
-                    execution::ContextError::InaccessibleUserContext => {
+                    ContextError::InaccessibleUserContext => {
                         SetContextFailure::InaccessibleUserContext
                     }
                 } as u64),
@@ -161,5 +181,6 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
             println!("set {:?}", ret);
             ret
         }
+        CallCode::Eret => unreachable!(),
     }
 }

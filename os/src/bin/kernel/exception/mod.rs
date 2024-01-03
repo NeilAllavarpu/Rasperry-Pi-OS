@@ -1,5 +1,6 @@
 //! Primary exception handlers
 
+use crate::exception::svc::CallCode;
 use crate::println;
 use bitfield_struct::bitfield;
 use core::arch::{asm, global_asm};
@@ -199,7 +200,7 @@ struct ExceptionSyndrome {
 
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
 /// Does **not** include `SVC`s
-extern "C" fn synchronous_exception_from_el0() {
+extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -222,7 +223,8 @@ extern "C" fn synchronous_exception_from_el0() {
             );
         }
         ExceptionClass::SvcAArch64 => {
-            unreachable!()
+            assert_eq!(unsafe { iss.svc }.code(), CallCode::Eret);
+            svc::eret_handle(x0, x1)
         }
         ExceptionClass::InstructionAbortEL0 => {
             instruction_abort::handle(
@@ -273,21 +275,26 @@ extern "C" fn irq_exception() {
     let interrupt_info =
         unsafe { core::ptr::read_volatile((0xFFFF_FFFF_FE64_2000_usize + 0x000C) as *mut u32) };
 
-    let freq: u64;
-    unsafe {
-        asm!("mrs {}, CNTFRQ_EL0", out(reg) freq);
-    }
-    unsafe {
-        asm!("msr CNTP_TVAL_EL0, {}", in(reg) freq);
-    }
+    // preemption
+    if interrupt_info & ((1 << 10) - 1) == 30 {
+        let freq: u64;
+        unsafe {
+            asm!("mrs {}, CNTFRQ_EL0", out(reg) freq);
+        }
+        unsafe {
+            asm!("msr CNTP_TVAL_EL0, {}", in(reg) freq);
+        }
 
-    unsafe {
-        core::ptr::write_volatile(
-            (0xFFFF_FFFF_FE64_2000_usize + 0x0010) as *mut u32,
-            interrupt_info,
-        )
-    }; // eoir
-    println!("Handle IRQ {}", interrupt_info);
+        unsafe {
+            core::ptr::write_volatile(
+                (0xFFFF_FFFF_FE64_2000_usize + 0x0010) as *mut u32,
+                interrupt_info,
+            )
+        }; // eoir
+        println!("Handle IRQ {}", interrupt_info);
+    } else {
+        todo!("Handle IRQ {:X}", interrupt_info);
+    }
 }
 
 /// Handles any exceptions should `SP_EL0` be erroneously used

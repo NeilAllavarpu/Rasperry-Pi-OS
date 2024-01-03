@@ -70,6 +70,7 @@
 #![feature(sync_unsafe_cell)]
 #![feature(ptr_mask)]
 #![feature(unchecked_math)]
+#![feature(never_type)]
 #![feature(unchecked_shifts)]
 
 pub mod cell;

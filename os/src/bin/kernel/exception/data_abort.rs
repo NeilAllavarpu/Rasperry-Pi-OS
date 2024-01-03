@@ -138,7 +138,6 @@ impl DataAbortIS {
 }
 /// Handles a data abort
 pub fn handle(iss: DataAbortIS) {
-    println!("iss {:X?} far {:X}", iss, faulting_address());
     // assert!(iss.instruction_syndrome_valid());
     page_fault::resolve_page_fault(&PageFaultInfo {
         access_type: if iss.was_write() {

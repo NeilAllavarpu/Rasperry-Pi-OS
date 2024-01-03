@@ -1,8 +1,6 @@
-use crate::sync::SpinLock;
 use bitfield_struct::bitfield;
 use core::ptr::NonNull;
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+use macros::AsBits;
 
 mod elf;
 pub use elf::load_elf;
@@ -38,57 +36,23 @@ impl PageDirectoryEntry {
 }
 
 /// Memory attributes describing a memory region
-#[derive(FromPrimitive, ToPrimitive)]
+#[repr(u64)]
+#[derive(Debug, AsBits)]
 enum MemoryAttribute {
     Normal = 0,
     Device = 1,
 }
 
-impl From<u64> for MemoryAttribute {
-    fn from(value: u64) -> Self {
-        #[expect(
-            clippy::expect_used,
-            reason = "This implementation is necessary for bitfield derivation"
-        )]
-        FromPrimitive::from_u64(value).expect("Invalid memory attribute provided")
-    }
-}
-
-impl From<MemoryAttribute> for u64 {
-    #[inline]
-    fn from(value: MemoryAttribute) -> Self {
-        // SAFETY: `MemoryAttribute` can always fit into a `u64`
-        unsafe { ToPrimitive::to_u64(&value).unwrap_unchecked() }
-    }
-}
-
 /// Shareability attributes describing a memory region
-#[derive(FromPrimitive, ToPrimitive)]
+#[repr(u64)]
+#[derive(Debug, AsBits)]
 enum Shareability {
     Non = 0b00,
     Outer = 0b10,
     Inner = 0b11,
 }
 
-impl From<u64> for Shareability {
-    fn from(value: u64) -> Self {
-        #[expect(
-            clippy::expect_used,
-            reason = "This implementation is necessary for bitfield derivation"
-        )]
-        FromPrimitive::from_u64(value).expect("Invalid shareability attribute provided")
-    }
-}
-
-impl From<Shareability> for u64 {
-    #[inline]
-    fn from(value: Shareability) -> Self {
-        // SAFETY: `Shareability` can always fit into a `u64`
-        unsafe { ToPrimitive::to_u64(&value).unwrap_unchecked() }
-    }
-}
-
-#[bitfield(u64, debug = false)]
+#[bitfield(u64)]
 struct PageTableEntry {
     valid: bool,
     res1: bool,
@@ -194,7 +158,7 @@ where
     where
         'address: 'table,
     {
-        // SAFETY: The conditions for teh creation of this address space ensure that this is a
+        // SAFETY: The conditions for the creation of this address space ensure that this is a
         // safe operation
         unsafe { self.base_table.as_mut() }
     }

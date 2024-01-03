@@ -67,7 +67,7 @@ pub struct UserContext {
 }
 
 impl UserContext {
-    fn pop(&self) -> u64 {
+    pub fn pop(&self) -> u64 {
         let popped_sp = unsafe {
             self.exception_stack
                 .fetch_ptr_sub(1, Ordering::Relaxed)
@@ -78,7 +78,7 @@ impl UserContext {
 
     /// Writes a `u64` to the memory pointed to by `exception_stack`, with user privileges, then increments the `exception_stack` pointer
     fn push(&self, val: u64) {
-        let pushed_sp = self.exception_stack.fetch_ptr_add(1, Ordering::Relaxed);
+        let pushed_sp = self.exception_stack.fetch_ptr_add(1, Ordering::SeqCst);
         unsafe { UserPointer(pushed_sp).write(val) }
     }
 }
@@ -136,6 +136,10 @@ impl Execution {
         }
     }
 
+    fn page_bits(&self) -> u8 {
+        16
+    }
+
     pub fn set_context(
         &self,
         user_context: *const UserContext,
@@ -164,19 +168,19 @@ impl Execution {
     fn contains_pa(&self, pa: u64) -> bool {
         self.writeable_pages
             .lock()
-            .binary_search_by(|x| x.addr().cmp(&pa))
+            .binary_search_by(|x| (x.addr() >> self.page_bits()).cmp(&(pa >> self.page_bits())))
             .is_ok()
             || self
                 .readable_pages
                 .lock()
-                .binary_search_by(|x| x.addr().cmp(&pa))
+                .binary_search_by(|x| (x.addr() >> self.page_bits()).cmp(&(pa >> self.page_bits())))
                 .is_ok()
     }
 
     fn contains_pa_writeable(&self, pa: u64) -> bool {
         self.writeable_pages
             .lock()
-            .binary_search_by(|x| x.addr().cmp(&pa))
+            .binary_search_by(|x| (x.addr() >> self.page_bits()).cmp(&(pa >> self.page_bits())))
             .is_ok()
     }
 
@@ -192,13 +196,16 @@ impl Execution {
     pub fn validate_user_pointer_writeable<T>(&self, ptr: *const T) -> Option<&T> {
         let pa = to_physical_addr(ptr.addr());
         println!("PA: {:X?}, VA: {:X?}", pa, ptr);
+        for a in self.writeable_pages.lock().iter() {
+            println!("Among:{:?}", a.addr());
+        }
         pa.ok().and_then(|pa| {
             self.contains_pa_writeable(pa.pa())
                 .then(|| unsafe { ptr.as_ref() }.unwrap())
         })
     }
 
-    fn user_context(&self) -> &UserContext {
+    pub fn user_context(&self) -> &UserContext {
         let context = self.user_context.load(Ordering::Relaxed);
         assert!(context.is_aligned());
         unsafe { context.as_ref() }.unwrap()
@@ -241,12 +248,10 @@ impl Execution {
             }
         }
 
-        println!("Preparing to pushcontext");
-
         let current = get_tpidr_el1();
         let context = self.user_context();
         let ev_addr = context.exception_vector.as_ptr().cast();
-        println!("addr {:X?}", ev_addr);
+
         let context: &UserContext = unsafe { transmute(context) };
 
         if let Some(current) = current {
@@ -271,6 +276,15 @@ impl Execution {
         let return_point = unsafe { UserPointer(ev_addr).read() };
 
         println!("Preparing to jump to {:X}", return_point);
+
+        if let ExceptionCode::Resumption = code {
+            unsafe {
+                asm! {
+                    "msr SP_EL0, xzr",
+                    options(nomem, nostack, preserves_flags),
+                }
+            }
+        }
 
         // SAFETY: This correctly sets up a return into user mode, after which entry into the kernel is only possible via exception/IRQ
         unsafe {
