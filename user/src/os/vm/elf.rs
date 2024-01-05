@@ -269,6 +269,8 @@ where
                             // );
                             // as *mut UserContext;
                             ctx_addr = Some(new_ctx);
+                        } else {
+                            // panic!("cant do virtual_start")
                         }
                         match header.filesz.cmp(&header.memsz) {
                             Ordering::Equal | Ordering::Less => {

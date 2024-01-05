@@ -1,7 +1,3 @@
-//! The libary operating system portion of the OS, residing in userspace. This implements any
-//! functionality safely permissible within a process' own execution, or calls another process or
-//! the kernel if unable to do so.
-
 #![no_main]
 #![no_std]
 #![warn(clippy::complexity)]
@@ -73,12 +69,6 @@
 #![feature(never_type)]
 #![feature(unchecked_shifts)]
 
-use core::ptr::NonNull;
-
-#[path = "../../user/src/cell/mod.rs"]
-pub mod cell;
-// pub mod heap;
-#[path = "../../user/src/os/mod.rs"]
-pub mod os;
-#[path = "../../user/src/sync/mod.rs"]
-pub mod sync;
+mod cell;
+mod os;
+mod sync;

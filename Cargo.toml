@@ -1,4 +1,4 @@
 [workspace]
-members = ["bootloader-loader", "macros", "os"]
+members = ["bootloader-loader", "macros", "os", "user"]
 exclude = ["bootloader-server", "xtask"]
 resolver = "2"

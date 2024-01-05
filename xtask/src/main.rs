@@ -1,3 +1,5 @@
+#![feature(iterator_try_collect)]
+use core::iter;
 use std::fs::File;
 use std::io;
 use std::io::Write;
@@ -55,19 +57,28 @@ fn project_root<'a>() -> &'a Path {
 
 fn build(is_debug: bool, output_dir: impl AsRef<Path>) -> Result<(), DynError> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(cargo);
-    command
-        .current_dir(project_root().join("os"))
-        .args(["build", "--bins", "-Z=unstable-options"])
-        .arg(format!("--out-dir={}", output_dir.as_ref().display()));
+    iter::repeat_with(|| Command::new(&cargo))
+        .zip(["os", "user"].iter())
+        .map(|(mut command, name)| {
+            let command = command
+                .current_dir(project_root().join(name))
+                .args(["build", "--bins", "-Z=unstable-options"])
+                .arg(format!("--out-dir={}", output_dir.as_ref().display()));
 
-    if !is_debug {
-        command.arg("--release");
-    }
-
-    if !command.status()?.success() {
-        Err("cargo build failed")?;
-    }
+            if !is_debug {
+                command.arg("--release");
+            }
+            command.status()
+        })
+        .map(|status| {
+            status.and_then(|status| {
+                status
+                    .success()
+                    .then_some(())
+                    .ok_or(io::Error::other("Error!"))
+            })
+        })
+        .try_collect()?;
 
     if is_debug {
         // We need to manually objcopy into a binary for debug mode, as well as get symbols
