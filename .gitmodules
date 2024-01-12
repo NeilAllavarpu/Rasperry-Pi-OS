@@ -1,3 +1,6 @@
 [submodule "device-tree"]
 	path = device-tree
 	url = https://github.com/NeilAllavarpu/device-tree.git
+[submodule "rust"]
+	path = rust
+	url = https://github.com/rust-lang/rust

@@ -74,13 +74,17 @@ impl InstructionAbortIS {
 }
 
 /// Handles an instruciton abort
-pub fn handle(iss: InstructionAbortIS) {
+pub fn handle(iss: InstructionAbortIS, x0: usize, x1: usize) -> (usize, usize) {
     // assert!(iss.instruction_syndrome_valid());
-    page_fault::resolve_page_fault(&PageFaultInfo {
-        access_type: AccessType::Instruction,
-        code: iss.status_code(),
-        level: iss.level(),
-        faulting_address: iss.faulting_address(),
-        access_bytes: 4,
-    })
+    page_fault::resolve_page_fault(
+        &PageFaultInfo {
+            access_type: AccessType::Instruction,
+            code: iss.status_code(),
+            level: iss.level(),
+            faulting_address: iss.faulting_address(),
+            access_bytes: 4,
+        },
+        x0,
+        x1,
+    )
 }

@@ -2,7 +2,7 @@
 target = "aarch64-unknown-none-softfloat"
 rustflags = [
    "-Ccode-model=tiny",
-   "-Clink-args=-O3 --optimize-bb-jumps -gc-sections --demangle",
+   "-Clink-args=-O3 --optimize-bb-jumps --demangle",
    "-Ctarget-cpu=cortex-a72",
    "-Cforce-frame-pointers=false",
    "-Cforce-unwind-tables=false",
@@ -16,3 +16,4 @@ panic = "abort"
 opt-level = "z"
 codegen-units = 128
 panic = "abort"
+strip = true

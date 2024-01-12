@@ -9,14 +9,14 @@ use crate::{
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use bitfield_struct::bitfield;
+use common::sync::SpinLock;
 use core::{
     arch::asm,
     hint,
     mem::transmute,
     ptr::{self, NonNull},
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicI8, AtomicPtr, AtomicU64, AtomicUsize, Ordering},
 };
-use stdos::sync::SpinLock;
 
 #[bitfield(u64, debug = false)]
 struct OptionPointer {
@@ -46,6 +46,7 @@ pub enum ExceptionCode {
     Preemption = 0,
     Resumption = 1,
     PageFault = 2,
+    UserSignal = 3,
 }
 
 /// An `Execution` represents a running context for a program of one or more cores.
@@ -57,7 +58,9 @@ pub struct Execution {
     user_context: AtomicPtr<UserContext>,
     ttbr0: AtomicU64,
     tcr_el1: AtomicU64,
-    token: AtomicBool,
+    token: AtomicI8,
+    pub pid: u16,
+    pending_messages: SpinLock<Vec<u16>>,
 }
 
 #[repr(C)]
@@ -77,7 +80,7 @@ impl UserContext {
     }
 
     /// Writes a `u64` to the memory pointed to by `exception_stack`, with user privileges, then increments the `exception_stack` pointer
-    fn push(&self, val: u64) {
+    pub fn push(&self, val: u64) {
         let pushed_sp = self.exception_stack.fetch_ptr_add(1, Ordering::SeqCst);
         unsafe { UserPointer(pushed_sp).write(val) }
     }
@@ -123,17 +126,31 @@ pub enum ContextError {
     InaccessibleUserContext,
 }
 
+mod execution_map;
+pub use execution_map::ExecutionMap;
+pub static EXECUTIONS: SpinLock<ExecutionMap> = SpinLock::new(ExecutionMap::new());
+
 impl Execution {
     /// Creates a new execution withs the given address space
-    pub const fn new(tcr_el1: u64, ttbr0: u64, user_context: *const UserContext) -> Self {
+    const fn new(tcr_el1: u64, ttbr0: u64, user_context: *const UserContext, pid: u16) -> Self {
         Self {
             writeable_pages: SpinLock::new(Vec::new()),
             readable_pages: SpinLock::new(Vec::new()),
-            token: AtomicBool::new(false),
+            token: AtomicI8::new(1),
             user_context: AtomicPtr::new(user_context.cast_mut()),
             ttbr0: AtomicU64::new(ttbr0),
             tcr_el1: AtomicU64::new(tcr_el1),
+            pid,
+            pending_messages: SpinLock::new(Vec::new()),
         }
+    }
+
+    pub fn add_signal(&self, sender: u16) {
+        self.pending_messages.lock().push(sender);
+    }
+
+    pub fn pop_signal(&self) -> Option<u16> {
+        self.pending_messages.lock().pop()
     }
 
     fn page_bits(&self) -> u8 {
@@ -232,8 +249,31 @@ impl Execution {
         result
     }
 
+    pub unsafe fn prepare_synchronous_jump(&self, x0: usize, x1: usize) {
+        let current = get_tpidr_el1();
+        let context = self.user_context();
+        let ev_addr = context.exception_vector.as_ptr().cast();
+
+        let return_point = unsafe { UserPointer(ev_addr).read() };
+        let faulting_instruction: u64;
+
+        unsafe {
+            asm! {
+                "mrs {OLD_ELR}, ELR_EL1",
+                "msr ELR_EL1, {ELR_EL1}",
+                ELR_EL1 = in(reg) return_point,
+                OLD_ELR = out(reg) faulting_instruction,
+                options(nomem, nostack, preserves_flags),
+            }
+        }
+
+        context.push(faulting_instruction);
+        context.push(x1.try_into().unwrap());
+        context.push(x0.try_into().unwrap());
+    }
+
     /// Jumps into usermode by calling the exception vector with the given code and arguments
-    pub fn jump_into(self: Arc<Self>, code: ExceptionCode, arguments: &[u64]) -> ! {
+    pub fn jump_into_async(self: Arc<Self>, code: ExceptionCode, argument: u64) -> ! {
         let ttbr0 = self.ttbr0.load(Ordering::Relaxed);
         let tcr_el1 = self.tcr_el1.load(Ordering::Relaxed);
 
@@ -268,23 +308,8 @@ impl Execution {
             ));
         }
 
-        for &arg in arguments {
-            context.push(arg);
-        }
-        context.push(code as u64);
-
         let return_point = unsafe { UserPointer(ev_addr).read() };
-
         println!("Preparing to jump to {:X}", return_point);
-
-        if let ExceptionCode::Resumption = code {
-            unsafe {
-                asm! {
-                    "msr SP_EL0, xzr",
-                    options(nomem, nostack, preserves_flags),
-                }
-            }
-        }
 
         // SAFETY: This correctly sets up a return into user mode, after which entry into the kernel is only possible via exception/IRQ
         unsafe {
@@ -292,8 +317,10 @@ impl Execution {
                 "msr SPSR_EL1, xzr",
                 "msr ELR_EL1, {ELR_EL1}",
                 "eret",
+                in("x0") code as u64,
+                in("x1") argument,
                 ELR_EL1 = in(reg) return_point,
-                options(noreturn, nostack, preserves_flags),
+                options(noreturn, nostack),
             }
         }
         // NOTE: This is only here due to a bug in rust-analyzer that incorrectly thinks that execution can fall through the noreturn asm block
@@ -307,6 +334,71 @@ impl Execution {
             .binary_search(&page)
             .expect_err("Should not add a duplicate page to an execution's writable set");
         pages.insert(insertion, page);
+    }
+
+    pub fn unblock(self: &Arc<Self>) {
+        let result = self
+            .token
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |token| match token {
+                0 => {
+                    // 0 = was previously blocked, so schedule self
+                    Some(1)
+                }
+                1 => {
+                    // 1 = was not previously blocked, but no token was available
+                    Some(2)
+                }
+                2 => {
+                    // 2 = token already available, do not change value
+                    Some(2)
+                }
+                other => unreachable!("Bad token value {other}"),
+            })
+            .unwrap();
+        if result == 0 {
+            add_to_running(Arc::clone(self))
+        }
+    }
+
+    pub fn block(self: Arc<Self>) {
+        let result = self
+            .token
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |token| match token {
+                0 => {
+                    // 0 = was previously blocked, shouldn't be possible
+                    unreachable!("Blocking from an already blocked context")
+                }
+                1 => {
+                    // 1 = no token was available, so block
+                    Some(0)
+                }
+                2 => {
+                    // 2 = token available, do not block
+                    Some(1)
+                }
+                other => unreachable!("Bad token value {other}"),
+            })
+            .unwrap();
+        println!("result is {result}");
+        if result == 1 {
+            assert!(Arc::strong_count(&self) >= 3);
+            drop(remove_current());
+            drop(self);
+            idle_loop()
+        }
+    }
+
+    pub fn exit(self: Arc<Self>) -> ! {
+        EXECUTIONS.lock().remove(self.pid).unwrap();
+        drop(self);
+        drop(remove_current().unwrap());
+        idle_loop();
+    }
+}
+
+impl Drop for Execution {
+    fn drop(&mut self) {
+        println!("Execution {} died!", self.pid);
     }
 }
 
@@ -388,7 +480,11 @@ pub fn idle_loop() -> ! {
                     options(nomem, nostack, preserves_flags)
                 }
             }
-            execution.jump_into(ExceptionCode::Resumption, &[]);
+            if let Some(sender) = execution.pop_signal() {
+                execution.jump_into_async(ExceptionCode::UserSignal, sender.into());
+            } else {
+                execution.jump_into_async(ExceptionCode::Resumption, 0);
+            }
         }
         hint::spin_loop();
     }

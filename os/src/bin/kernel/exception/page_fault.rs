@@ -4,6 +4,7 @@ use macros::AsBits;
 
 use crate::{
     execution::{self, ExceptionCode},
+    machine::faulting_address,
     println,
 };
 
@@ -48,7 +49,7 @@ pub(super) struct PageFaultInfo {
 }
 
 /// Resolves a page fault by either autofilling the translation, or invoking the execution's page fault handler
-pub(super) fn resolve_page_fault(info: &PageFaultInfo) {
+pub(super) fn resolve_page_fault(info: &PageFaultInfo, x0: usize, x1: usize) -> (usize, usize) {
     println!("PAGE FAULT: {:X?}", info.faulting_address);
     let current = execution::current()
         .expect("Page faults should not trigger outside the context of an `Execution`");
@@ -85,7 +86,13 @@ pub(super) fn resolve_page_fault(info: &PageFaultInfo) {
     };
     if call_signal {
         println!("Call signal handler!");
-        current.jump_into(ExceptionCode::PageFault, &[])
+        unsafe { current.prepare_synchronous_jump(x0, x1) };
+        (
+            ExceptionCode::PageFault as usize,
+            faulting_address().try_into().unwrap(),
+        )
+    } else {
+        (x0, x1)
     }
     // Else, the TLB refill is valid, so we can simply return to usermode
 }

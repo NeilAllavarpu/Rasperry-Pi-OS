@@ -198,9 +198,12 @@ struct ExceptionSyndrome {
     _res0: u32,
 }
 
+#[repr(C)]
+struct RegisterReturn(usize, usize);
+
 /// The main handler for synchronous EL0 exceptions. Dispatches to sub-handlers in other files
 /// Does **not** include `SVC`s
-extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) {
+extern "C" fn synchronous_exception_from_el0(x0: usize, x1: usize) -> RegisterReturn {
     let esr: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -217,20 +220,27 @@ extern "C" fn synchronous_exception_from_el0(x0: u64, x1: u64) {
     #[expect(clippy::wildcard_enum_match_arm)]
     match esr.exception_class() {
         ExceptionClass::DataAbortEL0 | ExceptionClass::DataAbortEL1 => {
-            data_abort::handle(
+            let (x0, x1) = data_abort::handle(
                 // SAFETY: This is the correct ISS and set validly
                 unsafe { iss.data_abort },
+                x0,
+                x1,
             );
+            RegisterReturn(x0, x1)
         }
         ExceptionClass::SvcAArch64 => {
             assert_eq!(unsafe { iss.svc }.code(), CallCode::Eret);
-            svc::eret_handle(x0, x1)
+            svc::handle_eret();
+            RegisterReturn(x0, x1)
         }
         ExceptionClass::InstructionAbortEL0 => {
-            instruction_abort::handle(
+            let (x0, x1) = instruction_abort::handle(
                 // SAFETY: This is the correct ISS and set validly
                 unsafe { iss.instruction_abort },
+                x0,
+                x1,
             );
+            RegisterReturn(x0, x1)
         }
         ExceptionClass::BreakpointEL1
         | ExceptionClass::SoftwareStepEL1

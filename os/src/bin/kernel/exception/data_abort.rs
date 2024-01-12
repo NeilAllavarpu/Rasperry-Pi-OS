@@ -137,17 +137,20 @@ impl DataAbortIS {
     }
 }
 /// Handles a data abort
-pub fn handle(iss: DataAbortIS) {
-    // assert!(iss.instruction_syndrome_valid());
-    page_fault::resolve_page_fault(&PageFaultInfo {
-        access_type: if iss.was_write() {
-            AccessType::Store
-        } else {
-            AccessType::Load
+pub fn handle(iss: DataAbortIS, x0: usize, x1: usize) -> (usize, usize) {
+    page_fault::resolve_page_fault(
+        &PageFaultInfo {
+            access_type: if iss.was_write() {
+                AccessType::Store
+            } else {
+                AccessType::Load
+            },
+            code: iss.status_code(),
+            level: iss.level(),
+            faulting_address: iss.faulting_address(),
+            access_bytes: 1 << iss.access_size(),
         },
-        code: iss.status_code(),
-        level: iss.level(),
-        faulting_address: iss.faulting_address(),
-        access_bytes: 1 << iss.access_size(),
-    });
+        x0,
+        x1,
+    )
 }

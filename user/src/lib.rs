@@ -1,3 +1,5 @@
+//! Usermode library OS to interface with the kernel and other user programs, and provide the basic abstractions of a standard monolithic kernel
+
 #![no_main]
 #![no_std]
 #![warn(clippy::complexity)]
@@ -9,6 +11,7 @@
 #![warn(clippy::style)]
 #![deny(clippy::suspicious)]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![feature(used_with_arg)]
 #![expect(
     clippy::allow_attributes,
     reason = "Unable to disable this just for some macros"
@@ -41,6 +44,11 @@
     clippy::separated_literal_suffix,
     reason = "This is the desired format"
 )]
+#![expect(clippy::pub_with_shorthand)]
+#![expect(clippy::single_call_fn)]
+#![expect(clippy::shadow_same)]
+#![expect(clippy::shadow_reuse)]
+#![expect(clippy::unreachable)]
 #![feature(allocator_api)]
 #![feature(asm_const)]
 #![feature(const_mut_refs)]
@@ -68,7 +76,73 @@
 #![feature(unchecked_math)]
 #![feature(never_type)]
 #![feature(unchecked_shifts)]
+#![feature(c_size_t)]
+#![feature(alloc_layout_extra)]
+#![feature(strict_provenance_atomic_ptr)]
+#![feature(non_null_convenience)]
+#![feature(unnamed_fields)]
+use core::{
+    ffi::c_int,
+    fmt::{Error, Write},
+    panic::PanicInfo,
+    sync::atomic::AtomicU32,
+};
 
-mod cell;
-mod os;
-mod sync;
+extern crate alloc;
+use bump_allocator::BumpAllocator;
+use os::syscalls;
+
+const EOF: c_int = -1;
+pub type Result<T> = core::result::Result<T, errno::Error>;
+pub mod bump_allocator;
+pub mod cell;
+pub mod errno;
+pub mod os;
+pub mod pid_map;
+pub mod runtime;
+pub mod signal;
+pub mod stdio;
+pub mod sync;
+pub mod sys;
+pub mod unistd;
+
+/// The global heap allocator for the kernel
+#[global_allocator]
+static mut KERNEL_ALLOCATOR: BumpAllocator = BumpAllocator::empty();
+
+pub struct Stdout;
+impl Write for Stdout {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        syscalls::write(s.as_bytes()).then_some(()).ok_or(Error)
+    }
+}
+
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        writeln!(&mut $crate::Stdout {}, $($arg)*).unwrap();
+    }};
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        write!(&mut $crate::Stdout{}, $($arg)*).unwrap();
+    }};
+}
+
+/// PANIC HANDLER
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    match (info.location(), info.message()) {
+        (None, None) => println!("thread 'main' panicked"),
+        (None, Some(message)) => println!("thread 'main' panicked:\n{message}"),
+        (Some(location), None) => println!("thread 'main' panicked at {location}"),
+        (Some(location), Some(message)) => {
+            println!("thread 'main' panicked at {location}:\n{message}");
+        }
+    }
+    syscalls::exit()
+}

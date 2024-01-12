@@ -8,6 +8,11 @@
 #![feature(panic_info_message)]
 #![feature(strict_provenance)]
 
+use common::os::{
+    syscalls::{self, alloc_page},
+    vm::{self, AddressSpace, ADDRESS_SPACE},
+};
+use common::sync::SpinLock;
 use core::sync::atomic::Ordering;
 use core::{
     alloc::GlobalAlloc,
@@ -17,11 +22,6 @@ use core::{
     panic::PanicInfo,
     ptr::NonNull,
     sync::atomic::{AtomicPtr, AtomicU64},
-};
-
-use stdos::os::{
-    syscalls::{self, alloc_page},
-    vm::{self, AddressSpace},
 };
 
 const INIT_TABLE_ENTRY_BASE: u64 = (1 << 53) // Privileged execute-never
@@ -78,6 +78,11 @@ static EXCEPTION_STACK: [AtomicU64; 8] = [const { AtomicU64::new(0) }; _];
 extern "C" fn _start() {
     unsafe {
         core::arch::asm! {
+            "mov x0, 0xFF8",
+            "mov x1, xzr",
+            "ldr x2, [x1]",
+            "str x2, [x0]",
+
             // Allocate a new page for the next stage ELF
             "svc 0x3000", // If the allocation fails, we're in trouble anyways, so don't bother error checking
             "ldr x0, ={TABLE_ENTRY_BASE}",
@@ -98,6 +103,7 @@ extern "C" fn _start() {
 
             // Copy the ELF to its new page
             "mov x0, 0x10000",
+            "mov sp, 0x10000",
             "mov x4, x1",
             "0: subs x4, x4, 1",
             "ldrb w5, [x3, x4]",
@@ -174,6 +180,9 @@ fn temporary_map(va: usize, pa: u64) {
 /// # Panics
 /// Panics if `next_part` is not page aligned
 unsafe extern "C" fn main(next_part: *mut u64, next_len: u16, pa: usize) -> ! {
+    ADDRESS_SPACE.set(SpinLock::new(unsafe {
+        AddressSpace::new(NonNull::new(0x1FF_0000 as *mut _).expect("Received a null page table"))
+    }));
     let mut uart = Stdout {};
     syscalls::write("Hello from usermode!\n".as_bytes());
     writeln!(&mut uart, "{next_part:X?} {next_len:X?} {pa:X?}");
@@ -199,10 +208,10 @@ unsafe extern "C" fn main(next_part: *mut u64, next_len: u16, pa: usize) -> ! {
     };
 
     //elf load
-    let (entry, bss_start, bss_end, ctx) =
-        vm::load_elf(&mut address_space, elf, pa.try_into().unwrap()).unwrap();
+    let (entry, bss_start, bss_end, ctx, sp) =
+        vm::load_elf(&mut address_space, new_pd, elf, pa.try_into().unwrap(), &[]).unwrap();
 
-    write!(&mut uart, "point {entry:X?} {ctx:X?}\n");
+    write!(&mut uart, "point {entry:X?} {ctx:X?} {sp:X}\n");
 
     // // fork+exec into it
     // let val = u32::from_le(unsafe { (entry as *mut u32).read() });
@@ -213,7 +222,7 @@ unsafe extern "C" fn main(next_part: *mut u64, next_len: u16, pa: usize) -> ! {
     // unsafe { *(new_ctx as *mut u64) = entry };
 
     // syscalls::fork();
-    syscalls::exec(ctx as *mut _, new_pd, 0).unwrap();
+    syscalls::exec(ctx as *mut _, new_pd, 0, sp - 0x100).unwrap();
 
     // - cow fork
     // - replace PD with new one
@@ -226,7 +235,7 @@ unsafe extern "C" fn main(next_part: *mut u64, next_len: u16, pa: usize) -> ! {
 
 #[naked]
 extern "C" fn _exception_handler() {
-    static HANDLER_TABLE: [extern "C" fn(); 3] = [preemption, resumption, page_fault];
+    static HANDLER_TABLE: [extern "C" fn(); 4] = [preemption, resumption, page_fault, etc];
     // save a pair of regs to special save area
     // read the signal code and branch accordingly
 
@@ -236,23 +245,19 @@ extern "C" fn _exception_handler() {
 
     unsafe {
         asm! {
-            "cmp sp, xzr",
-            "b.eq {resumption}",
-            "stp x0, x1, [sp, -16]!",
-            "stp x2, x3, [sp, -16]!",
-            "adr x0, {ctx}",
-            "ldr x1, [x0, 8]!",
-            "ldr x2, [x1, -8]!",
-            "str x1, [x0]",
-            "adr x0, {table}",
-            "ldr x0, [x0, x2, LSL #3]",
-            "blr x0",
-            ctx = sym CONTEXT,
+            // "cmp sp, xzr",
+            // "b.eq {resumption}",
+            "adr x2, {table}",
+            "ldr x2, [x2, x0, LSL #3]",
+            "blr x2",
             table = sym HANDLER_TABLE,
-            resumption = sym resumption,
             options(noreturn)
         }
     }
+}
+
+extern "C" fn etc() {
+    todo!("uh oh (user sig?)");
 }
 
 extern "C" fn page_fault() {
@@ -268,9 +273,6 @@ extern "C" fn resumption() {
     unsafe {
         asm! {
             "adr x0, {ctx}",
-            "ldr x1, [x0, 8]",
-            "sub x1, x1, 8",
-            "str x1, [x0, 8]",
             "ldnp x2,  x3,  [x0, 0x20]",
             "ldnp x4,  x5,  [x0, 0x30]",
             "ldnp x6,  x7,  [x0, 0x40]",
@@ -285,7 +287,6 @@ extern "C" fn resumption() {
             "ldnp x24, x25, [x0, 0xD0]",
             "ldnp x26, x27, [x0, 0xE0]",
             "ldnp x30, x29, [x0, 0x100]",
-            "mov sp, x29",
             "ldnp x28, x29, [x0, 0xF0]",
             "ldnp x0,  x1,  [x0, 0x10]",
             "svc 0x0",
@@ -294,8 +295,6 @@ extern "C" fn resumption() {
         }
     }
 }
-
-// extern "C" fn other
 
 extern "C" fn exception_handler() -> ! {
     let mut uart = Stdout {};

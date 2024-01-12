@@ -1,5 +1,5 @@
 {
-    "rust-analyzer.cargo.target": "aarch64-unknown-none",
+    "rust-analyzer.cargo.target": "aarch64-unknown-none-softfloat",
     "rust-analyzer.check.allTargets": false,
     "rust-analyzer.check.command": "clippy",
     "rust-analyzer.files.excludeDirs": [

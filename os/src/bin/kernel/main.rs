@@ -47,6 +47,8 @@
 
 use alloc::sync::Arc;
 use bump_allocator::BumpAllocator;
+use common::cell::OnceLock;
+use common::sync::SpinLock;
 use core::arch::asm;
 use core::fmt::Write;
 use core::num::NonZeroUsize;
@@ -55,8 +57,6 @@ use core::ptr::{self, addr_of_mut, NonNull};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 use core::{hint, mem};
 use device_tree::dtb::DeviceTree;
-use stdos::cell::OnceLock;
-use stdos::sync::SpinLock;
 
 mod boot;
 mod bump_allocator;
@@ -71,7 +71,7 @@ use uart::Uart;
 extern crate alloc;
 
 use crate::boot::STACK_SIZE;
-use crate::execution::{ExceptionCode, Execution, UserContext};
+use crate::execution::{ExceptionCode, Execution, UserContext, EXECUTIONS};
 use crate::memory::PAGE_ALLOCATOR;
 
 /// Physical address of the init program's top-level translation table
@@ -223,7 +223,7 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
             };
         }
 
-        let init = Arc::new(Execution::new(tcr, 0x0, ctx_ptr));
+        let init = EXECUTIONS.lock().create(tcr, 0x0, ctx_ptr);
         init.add_writable_page(page);
 
         let num_cores = device_tree.root().cpus().iter().count();
@@ -231,7 +231,7 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
             hint::spin_loop();
         }
 
-        init.jump_into(ExceptionCode::Resumption, &[])
+        init.jump_into_async(ExceptionCode::Resumption, 0)
     } else {
         while !GLOBAL_SETUP_DONE.load(Ordering::Acquire) {
             hint::spin_loop();

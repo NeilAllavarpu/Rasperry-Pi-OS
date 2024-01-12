@@ -6,7 +6,7 @@ use bitfield_struct::bitfield;
 use macros::AsBits;
 
 use crate::{
-    execution::{self, ContextError, ExceptionCode},
+    execution::{self, ContextError, ExceptionCode, Execution, EXECUTIONS},
     memory::PAGE_ALLOCATOR,
     println, UART,
 };
@@ -22,6 +22,9 @@ pub(super) enum CallCode {
     Exit = 0x2000,
     AllocPage = 0x3000,
     SetInfo = 0x4000,
+    Unblock = 0x5000,
+    Block = 0x6000,
+    SendSignal = 0x7000,
     Eret = 0x0,
 }
 
@@ -37,22 +40,22 @@ pub struct SvcIS {
 /// Return values for system calls, to be stored into registers
 pub struct Return {
     /// Whether or not the system call was successful
-    is_success: bool,
+    status: u64,
     /// Any relevant value returned from the syscall
     value: u64,
 }
 
 /// Creates the appropriate return value for a system call, given a success condition and any values
 macro_rules! ret {
-    ($is_success:expr) => {{
+    ($status:expr) => {{
         Return {
-            is_success: $is_success,
+            status: $status,
             value: Default::default(),
         }
     }};
-    ($is_success:expr, $val:expr) => {{
+    ($status:expr, $val:expr) => {{
         Return {
-            is_success: $is_success,
+            status: $status,
             value: $val,
         }
     }};
@@ -61,36 +64,51 @@ macro_rules! ret {
 /// Creates a successful system call return value
 macro_rules! success {
     () => {
-        ret!(false)
+        ret!(0)
     };
     ($val:expr) => {
-        ret!(false, $val)
+        ret!(0, $val)
     };
 }
 
 /// Creates a failure system call return value
 macro_rules! fail {
     () => {
-        ret!(true)
+        ret!(1)
     };
-    ($val:expr) => {
-        ret!(true, $val)
+    ($status:expr) => {
+        ret!($status)
     };
+    ($status:expr, $val:expr) => {{
+        assert_ne!(status, 0);
+        ret!($status, $val)
+    }};
 }
 
 #[derive(Debug)]
 enum SetContextFailure {
-    InaccessibleTtbr0 = 0b00,
-    MisalignedTtbr0 = 0b01,
-    InvalidTcrBits = 0b10,
-    InaccessibleUserContext = 0b100,
-    MisalignedUserContext = 0b101,
+    InaccessibleTtbr0 = 0b010,
+    MisalignedTtbr0 = 0b011,
+    InvalidTcrBits = 0b100,
+    InaccessibleUserContext = 0b110,
+    MisalignedUserContext = 0b111,
 }
 
-pub fn eret_handle(x0: u64, x1: u64) {
+/// Handles an `eret`
+pub fn handle_eret() {
     let execution = execution::current()
         .expect("Current execution should be set when receiving a syscall from usermode");
     let return_address = execution.user_context().pop();
+    println!("ERET: {return_address:X}");
+    let sp: u64;
+    unsafe {
+        asm! {
+            "mrs {}, SP_EL0",
+            out(reg) sp,
+            options(nomem, nostack, preserves_flags)
+        }
+    }
+    println!("sp at {:X}", sp);
     unsafe {
         asm! {
             "msr ELR_EL1, {}",
@@ -100,26 +118,25 @@ pub fn eret_handle(x0: u64, x1: u64) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 /// The general system call handler; dispatches to more specific handlers in other files
-pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
+pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
     let execution = execution::current()
         .expect("Current execution should be set when receiving a syscall from usermode");
-    let esr: u64;
+    let esr_el1: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
         core::arch::asm! {
             "mrs {}, ESR_EL1",
-            out(reg) esr,
+            lateout(reg) esr_el1,
             options(nomem, nostack, preserves_flags)
         };
     };
 
-    let esr = ExceptionSyndrome::from(esr);
+    let esr = ExceptionSyndrome::from(esr_el1);
     let iss = unsafe { esr.instruction_syndrome().svc };
     match iss.code() {
-        CallCode::Exit => {
-            todo!("Implement program exits")
-        }
+        CallCode::Exit => execution.exit(),
         CallCode::Print => {
             let data_ptr: *const u8 = ptr::from_exposed_addr(
                 usize::try_from(arg0).expect("usizes and u64s should be interchangeable"),
@@ -141,7 +158,6 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
                 .alloc()
             {
                 let addr = result.addr();
-                // TODO: store this page for the process
                 execution.add_writable_page(result);
                 success!(addr)
             } else {
@@ -149,7 +165,16 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
             }
         }
         CallCode::SetInfo => {
-            let ret = match execution.set_context(
+            let sp: u64;
+            unsafe {
+                asm! {
+                    "mrs {}, SP_EL0",
+                    out(reg) sp,
+                    options(nomem, nostack, preserves_flags)
+                }
+            }
+            println!("otha sp at {:X}", sp);
+            match execution.set_context(
                 ptr::from_exposed_addr(
                     usize::try_from(arg0).expect("`u64` should always fit into `usize`"),
                 ),
@@ -157,7 +182,7 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
                 arg2,
             ) {
                 Ok(()) => {
-                    execution.jump_into(ExceptionCode::Resumption, &[]);
+                    execution.jump_into_async(ExceptionCode::Resumption, 0);
                 }
                 #[expect(clippy::as_conversions)]
                 Err(err) => fail!(match err {
@@ -177,10 +202,31 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
                         SetContextFailure::InaccessibleUserContext
                     }
                 } as u64),
-            };
-            println!("set {:?}", ret);
-            ret
+            }
         }
         CallCode::Eret => unreachable!(),
+        CallCode::Unblock => {
+            let status = u16::try_from(arg0)
+                .ok()
+                .and_then(|pid| EXECUTIONS.lock().get(pid).map(Execution::unblock))
+                .is_some();
+            if status {
+                success!()
+            } else {
+                fail!()
+            }
+        }
+        CallCode::Block => {
+            execution.block();
+            success!()
+        }
+        CallCode::SendSignal => {
+            if let Some(target) = EXECUTIONS.lock().get(arg0.try_into().unwrap()) {
+                target.add_signal(execution.pid);
+                success!()
+            } else {
+                fail!()
+            }
+        }
     }
 }

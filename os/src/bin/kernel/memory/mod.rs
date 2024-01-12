@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
+use common::cell::OnceLock;
 use core::sync::atomic::{AtomicU16, Ordering};
 use core::{iter, mem};
-use stdos::cell::OnceLock;
 
 pub type ProcessCount = u16;
 pub type AtomicProcessCount = AtomicU16;

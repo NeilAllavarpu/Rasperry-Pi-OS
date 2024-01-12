@@ -98,7 +98,7 @@ fn build(is_debug: bool, output_dir: impl AsRef<Path>) -> Result<(), DynError> {
         .append(true)
         .open(output_dir.as_ref().join("kernel"))?;
 
-    let to_append = ["init", "serial"];
+    let to_append = ["init", "pipe", "serial"];
     let files = to_append
         .iter()
         .map(|x| File::open(output_dir.as_ref().join(x)).unwrap())

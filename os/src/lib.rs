@@ -73,12 +73,37 @@
 #![feature(never_type)]
 #![feature(unchecked_shifts)]
 
-use core::ptr::NonNull;
+use core::{
+    fmt::{Error, Write},
+    ptr::NonNull,
+};
 
-#[path = "../../user/src/cell/mod.rs"]
 pub mod cell;
 // pub mod heap;
-#[path = "../../user/src/os/mod.rs"]
 pub mod os;
-#[path = "../../user/src/sync/mod.rs"]
 pub mod sync;
+
+pub struct Stdout;
+impl Write for Stdout {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        crate::os::syscalls::write(s.as_bytes())
+            .then_some(())
+            .ok_or(Error)
+    }
+}
+
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        writeln!(&mut $crate::Stdout {}, $($arg)*).unwrap();
+    }};
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        write!(&mut $crate::Stdout{}, $($arg)*).unwrap();
+    }};
+}

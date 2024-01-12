@@ -77,7 +77,6 @@ _exception_vector:
     stp    x12, x13, [sp, #0x60]
     stp    x14, x15, [sp, #0x70]
     stp    x16, x17, [sp, #0x80]
-    stp    x0, x1, [sp, #0x90]
 
     bl    {synchronous}
 
@@ -86,7 +85,6 @@ _exception_vector:
     // this must be very short to fit in
 
     // Restore everything in reverse order that it was saved
-    ldp    x0, x1, [sp, #0x90]
     ldp    x16, x17, [sp, #0x80]
     ldp    x14, x15, [sp, #0x70]
     ldp    x12, x13, [sp, #0x60]
