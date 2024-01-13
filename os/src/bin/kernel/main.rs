@@ -48,7 +48,7 @@
 use alloc::sync::Arc;
 use bump_allocator::BumpAllocator;
 use common::cell::OnceLock;
-use common::sync::SpinLock;
+use common::sync::{SpinLock, WriteGuard};
 use core::arch::asm;
 use core::fmt::Write;
 use core::num::NonZeroUsize;
@@ -223,7 +223,10 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
             };
         }
 
-        let init = EXECUTIONS.lock().create(tcr, 0x0, ctx_ptr);
+        let mut executions = EXECUTIONS.write();
+        let init_pid = executions.create(tcr, 0x0, ctx_ptr);
+        let executions = WriteGuard::downgrade(executions);
+        let init = executions.get(init_pid).unwrap();
         init.add_writable_page(page);
 
         let num_cores = device_tree.root().cpus().iter().count();
@@ -231,7 +234,7 @@ extern "C" fn main(device_tree_address: *mut u64, device_tree_size: usize) -> ! 
             hint::spin_loop();
         }
 
-        init.jump_into_async(ExceptionCode::Resumption, 0)
+        Execution::jump_into_async(executions, init_pid, ExceptionCode::Resumption, 0)
     } else {
         while !GLOBAL_SETUP_DONE.load(Ordering::Acquire) {
             hint::spin_loop();

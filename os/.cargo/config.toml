@@ -7,6 +7,7 @@ rustflags = [
    "-Cforce-frame-pointers=false",
    "-Cforce-unwind-tables=false",
    "-Clinker-plugin-lto=true",
+   "-Cstrip=symbols",
 ]
 
 [profile.dev]

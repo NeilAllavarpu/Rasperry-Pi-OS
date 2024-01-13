@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 use bitfield_struct::bitfield;
-use common::sync::SpinLock;
+use common::sync::{MutexGuard, ReadGuard, RwLock, SpinLock};
 use core::{
     arch::asm,
     hint,
@@ -61,6 +61,21 @@ pub struct Execution {
     token: AtomicI8,
     pub pid: u16,
     pending_messages: SpinLock<Vec<u16>>,
+}
+
+impl Clone for Execution {
+    fn clone(&self) -> Self {
+        Self {
+            writeable_pages: SpinLock::new(self.writeable_pages.lock().clone()),
+            readable_pages: SpinLock::new(self.readable_pages.lock().clone()),
+            user_context: AtomicPtr::new(self.user_context.load(Ordering::Relaxed)),
+            ttbr0: AtomicU64::new(self.ttbr0.load(Ordering::Relaxed)),
+            tcr_el1: AtomicU64::new(self.tcr_el1.load(Ordering::Relaxed)),
+            token: AtomicI8::new(self.token.load(Ordering::Relaxed)),
+            pid: self.pid,
+            pending_messages: SpinLock::new(self.pending_messages.lock().clone()),
+        }
+    }
 }
 
 #[repr(C)]
@@ -128,7 +143,7 @@ pub enum ContextError {
 
 mod execution_map;
 pub use execution_map::ExecutionMap;
-pub static EXECUTIONS: SpinLock<ExecutionMap> = SpinLock::new(ExecutionMap::new());
+pub static EXECUTIONS: RwLock<ExecutionMap> = RwLock::new(ExecutionMap::new());
 
 impl Execution {
     /// Creates a new execution withs the given address space
@@ -203,7 +218,6 @@ impl Execution {
 
     pub fn validate_user_pointer<T>(&self, ptr: *const T) -> Option<&T> {
         let pa = to_physical_addr(ptr.addr());
-        println!("the pa is {:X?}", pa);
         pa.ok().and_then(|pa| {
             self.contains_pa(pa.pa())
                 .then(|| unsafe { ptr.as_ref() }.unwrap())
@@ -212,10 +226,6 @@ impl Execution {
 
     pub fn validate_user_pointer_writeable<T>(&self, ptr: *const T) -> Option<&T> {
         let pa = to_physical_addr(ptr.addr());
-        println!("PA: {:X?}, VA: {:X?}", pa, ptr);
-        for a in self.writeable_pages.lock().iter() {
-            println!("Among:{:?}", a.addr());
-        }
         pa.ok().and_then(|pa| {
             self.contains_pa_writeable(pa.pa())
                 .then(|| unsafe { ptr.as_ref() }.unwrap())
@@ -250,7 +260,6 @@ impl Execution {
     }
 
     pub unsafe fn prepare_synchronous_jump(&self, x0: usize, x1: usize) {
-        let current = get_tpidr_el1();
         let context = self.user_context();
         let ev_addr = context.exception_vector.as_ptr().cast();
 
@@ -273,9 +282,17 @@ impl Execution {
     }
 
     /// Jumps into usermode by calling the exception vector with the given code and arguments
-    pub fn jump_into_async(self: Arc<Self>, code: ExceptionCode, argument: u64) -> ! {
-        let ttbr0 = self.ttbr0.load(Ordering::Relaxed);
-        let tcr_el1 = self.tcr_el1.load(Ordering::Relaxed);
+    pub fn jump_into_async(
+        guard: ReadGuard<ExecutionMap>,
+        pid: u16,
+        code: ExceptionCode,
+        argument: u64,
+    ) -> ! {
+        let execution = guard.get(pid).unwrap();
+        let ttbr0 = execution.ttbr0.load(Ordering::Relaxed);
+        let tcr_el1 = execution.tcr_el1.load(Ordering::Relaxed);
+        let ev_addr = execution.user_context().exception_vector.as_ptr().cast();
+        drop(guard);
 
         unsafe {
             asm! {
@@ -288,29 +305,11 @@ impl Execution {
             }
         }
 
-        let current = get_tpidr_el1();
-        let context = self.user_context();
-        let ev_addr = context.exception_vector.as_ptr().cast();
-
-        let context: &UserContext = unsafe { transmute(context) };
-
-        if let Some(current) = current {
-            // If TPIDR_EL1 is currently set to point to this execution, the strong count must be at least one from there, so we can drop the current `Arc` and keep the execution alive
-            assert!(
-                Arc::strong_count(&self) >= 2,
-                "Arc count should be at least two from the local Arc and the Arc in TPIDR_EL1"
-            );
-            assert_eq!(current.as_ptr().cast_const(), Arc::as_ptr(&self), "When jumping into an execution, the current execution should not be a different execution");
-            drop(self);
-        } else {
-            set_tpidr_el1(Some(
-                NonNull::new(Arc::into_raw(self).cast_mut()).expect("`Arc`s should never be null"),
-            ));
-        }
+        set_current(pid);
 
         let return_point = unsafe { UserPointer(ev_addr).read() };
-        println!("Preparing to jump to {:X}", return_point);
 
+        println!("RUNNING EXECUTION: {}", pid);
         // SAFETY: This correctly sets up a return into user mode, after which entry into the kernel is only possible via exception/IRQ
         unsafe {
             asm! {
@@ -336,7 +335,7 @@ impl Execution {
         pages.insert(insertion, page);
     }
 
-    pub fn unblock(self: &Arc<Self>) {
+    pub fn unblock(&self) {
         let result = self
             .token
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |token| match token {
@@ -356,12 +355,15 @@ impl Execution {
             })
             .unwrap();
         if result == 0 {
-            add_to_running(Arc::clone(self))
+            add_to_running(self.pid);
         }
     }
 
-    pub fn block(self: Arc<Self>) {
-        let result = self
+    pub fn block(pid: u16) {
+        let result = EXECUTIONS
+            .read()
+            .get(pid)
+            .unwrap()
             .token
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |token| match token {
                 0 => {
@@ -379,19 +381,14 @@ impl Execution {
                 other => unreachable!("Bad token value {other}"),
             })
             .unwrap();
-        println!("result is {result}");
+
         if result == 1 {
-            assert!(Arc::strong_count(&self) >= 3);
-            drop(remove_current());
-            drop(self);
             idle_loop()
         }
     }
 
-    pub fn exit(self: Arc<Self>) -> ! {
-        EXECUTIONS.lock().remove(self.pid).unwrap();
-        drop(self);
-        drop(remove_current().unwrap());
+    pub fn exit(pid: u16) -> ! {
+        EXECUTIONS.write().remove(pid).unwrap();
         idle_loop();
     }
 }
@@ -403,87 +400,83 @@ impl Drop for Execution {
 }
 
 /// Reads the value of `TPIDR_EL1`, as a pointer
-fn get_tpidr_el1() -> Option<NonNull<Execution>> {
-    let tpidr_el1;
+fn get_tpidr() -> u64 {
+    let tpidr;
     // SAFETY: This touches only a system register with no other side effects
     unsafe {
         asm! {
-            "mrs {}, TPIDR_EL1",
-            out(reg) tpidr_el1,
+            "mrs {}, TPIDRRO_EL0",
+            out(reg) tpidr,
             options(nomem, nostack, preserves_flags)
         };
     }
-    NonNull::new(tpidr_el1)
+    tpidr
 }
 
-/// Writes the value of a pointer to `TPIDR_EL1`
-fn set_tpidr_el1(execution: Option<NonNull<Execution>>) {
-    let ptr = execution.map_or(ptr::null_mut(), NonNull::as_ptr);
+/// Writes a value to `TPIDR_EL1`
+fn set_tpidr(tpidr: u64) {
     // SAFETY: This touches only a system register with no other side effects
     unsafe {
         asm! {
             "msr TPIDR_EL1, {}",
-            in(reg) ptr,
+            in(reg) tpidr,
             options(nomem, nostack, preserves_flags)
         };
     }
 }
 
 /// Returns an `Arc` referring to the current execution for this core, or `None` if there is no such execution
-pub fn current() -> Option<Arc<Execution>> {
-    get_tpidr_el1().map(|execution| {
-        let execution = execution.as_ptr();
-        // SAFETY: Because the pointer was in TPIDR_EL1 and nonnull, it points to an alive `Arc` that came from `Arc::into_raw`
-        // Incrementing implements cloning the arc, but without needing to change TPIDR_EL1 multiple times
-        unsafe { Arc::increment_strong_count(execution) }
-        // SAFETY: See above
-        unsafe { Arc::from_raw(execution) }
-    })
+pub fn current() -> u16 {
+    u16::try_from(get_tpidr()).expect("PID should fit into 16 bits")
 }
 
-/// Returns and removes an `Arc` referring to the current execution for this core, or `None` if there is no such execution. After doing so, any subsequent calls to `current` return `None` until set by another function
-pub fn remove_current() -> Option<Arc<Execution>> {
-    let old_current = get_tpidr_el1().map(|execution| {
-        let execution = execution.as_ptr();
-        // SAFETY: If TPIDR_EL1 is not null, it must have been set with the value of some `Arc::into_raw` call, so this is a safe operation
-        unsafe { Arc::from_raw(execution) }
-    });
-    set_tpidr_el1(None);
-    old_current
+pub fn set_current(pid: u16) {
+    set_tpidr(pid.into())
 }
 
 /// The queue for all executions that are ready to run
-static RUN_QUEUE: SpinLock<VecDeque<Arc<Execution>>> = SpinLock::new(VecDeque::new());
+static RUN_QUEUE: SpinLock<VecDeque<u16>> = SpinLock::new(VecDeque::new());
 
 /// Schedules an `Execution` to run
-pub fn add_to_running(execution: Arc<Execution>) {
-    RUN_QUEUE.lock().push_back(execution);
+pub fn add_to_running(pid: u16) {
+    RUN_QUEUE.lock().push_back(pid);
 }
 
 /// Sets a new `Execution` to be the running `Execution` for the core.
 pub fn idle_loop() -> ! {
-    assert!(
-        current().is_none(),
-        "The currently active execution should be cleared before the idle loop"
-    );
-    unsafe {
-        asm! {
-            "msr DAIFClr, 0b1111",
-            options(nomem, nostack, preserves_flags)
-        }
-    }
     loop {
-        if let Some(execution) = RUN_QUEUE.lock().pop_front() {
+        unsafe {
+            asm! {
+                "msr DAIFSet, 0b1111",
+                options(nomem, nostack, preserves_flags)
+            }
+        }
+        let mut queue = RUN_QUEUE.lock();
+        if let Some(pid) = queue.pop_front() {
             unsafe {
                 asm! {
                     "msr DAIFSet, 0b1111",
                     options(nomem, nostack, preserves_flags)
                 }
             }
+            let executions = EXECUTIONS.read();
+            let execution = executions.get(pid).unwrap();
             if let Some(sender) = execution.pop_signal() {
-                execution.jump_into_async(ExceptionCode::UserSignal, sender.into());
+                Execution::jump_into_async(
+                    executions,
+                    pid,
+                    ExceptionCode::UserSignal,
+                    sender.into(),
+                );
             } else {
-                execution.jump_into_async(ExceptionCode::Resumption, 0);
+                Execution::jump_into_async(executions, pid, ExceptionCode::Resumption, 0);
+            }
+        }
+        drop(queue);
+        unsafe {
+            asm! {
+                "msr DAIFClr, 0b1111",
+                options(nomem, nostack, preserves_flags)
             }
         }
         hint::spin_loop();

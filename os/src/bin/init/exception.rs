@@ -1,14 +1,7 @@
-use alloc::boxed::Box;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
-use crate::{
-    println,
-    signal::ffi::{SigInfo, SigVal},
-    sys::types::ffi::pid_t,
-};
-
-use super::init::_start;
+use crate::main;
 use core::{
     arch,
     ffi::{c_int, c_void},
@@ -48,12 +41,11 @@ impl UserContext {
 }
 
 /// Memory for the exception stack to save context
-static mut EXCEPTION_STACK: [unsafe extern "C" fn(); 8] = [
-    _start, _start, _start, _start, _start, _start, _start, _start,
-];
+static mut EXCEPTION_STACK: [unsafe extern "C" fn(*mut u64, u16, usize) -> !; 8] =
+    [main, main, main, main, main, main, main, main];
 
 /// Save region for the stack pointer
-pub static mut SP: u64 = 0;
+pub static mut SP: u64 = 0x1_0000 - 0x100;
 
 /// The handlers to which to dispatch to; index determines which code is used
 static HANDLER_TABLE: [AtomicPtr<()>; 4] = [
@@ -123,7 +115,6 @@ unsafe extern "C" fn preemption() {
     unsafe {
         arch::asm! {
             // LOAD x0 FROM EXCEPTION STACK!!!!!!
-            "ldp x0,  x1,  [sp], 0x10",
             "stp x0,  x1,  [sp, -0x100]!",
             "stp x2,  x3,  [sp, 0x10]",
             "stp x4,  x5,  [sp, 0x20]",
@@ -161,9 +152,6 @@ unsafe extern "C" fn resumption() {
     // SAFETY: The caller upholds safety guarantees
     unsafe {
         arch::asm! {
-            "cbz x1, 0f",
-            "mov sp, x1",
-            "0:",
             "ldp x2,  x3,  [sp, 0x10]",
             "ldp x4,  x5,  [sp, 0x20]",
             "ldp x6,  x7,  [sp, 0x30]",
@@ -201,134 +189,8 @@ struct ReturnRegs {
     x1: u64,
 }
 
-pub enum HandlerType {
-    Signal(unsafe extern "C" fn(c_int)),
-    SigAction(unsafe extern "C" fn(c_int, *mut SigInfo, *mut c_void)),
-}
-pub(crate) struct SignalInfo {
-    handler: HandlerType,
-    switch_stack: bool,
-}
-
-pub struct AtomicBox<T>(AtomicPtr<T>);
-
-struct TaggedPointer<T>(*mut T);
-
-impl<T> TaggedPointer<T> {
-    fn ptr(self) -> *mut T {
-        self.0
-    }
-
-    fn tag(self) -> u8 {
-        u8::try_from(self.0.addr() >> 56).unwrap()
-    }
-}
-
-impl<T> Clone for TaggedPointer<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for TaggedPointer<T> {}
-
-impl<T> AtomicBox<T> {
-    const unsafe fn new() -> Self {
-        Self(AtomicPtr::new(ptr::null_mut()))
-    }
-
-    /// reeeeplace
-    pub fn replace(&self, info: Box<T>) -> Option<Box<T>> {
-        let raw_ptr = Box::into_raw(info);
-        let prev_ptr = loop {
-            let prev_ptr = TaggedPointer(self.0.load(Ordering::Relaxed));
-            if prev_ptr.tag() == 0
-                && let Ok(previous_ptr) = self.0.compare_exchange(
-                    prev_ptr.0,
-                    raw_ptr,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
-            {
-                break previous_ptr;
-            }
-            hint::spin_loop();
-        };
-        NonNull::new(prev_ptr).map(|ptr| unsafe { Box::from_raw(ptr.as_ptr()) })
-    }
-
-    ///reaads
-    #[allow(clippy::unwrap_in_result)]
-    pub fn read(&self) -> Option<AtomicBoxGuard<T>> {
-        let raw_ptr = self
-            .0
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |ptr| {
-                if ptr.is_null() {
-                    None
-                } else {
-                    Some(ptr.map_addr(|addr| {
-                        let addr_portion = addr & 0xFF_FFFF_FFFF_FFFF;
-                        let top_bits = u8::try_from(addr >> 56).unwrap();
-                        let new_count = top_bits.checked_add(1).unwrap();
-                        addr_portion & (usize::from(new_count) << 56)
-                    }))
-                }
-            });
-        match raw_ptr {
-            Ok(raw_ptr) => Some(AtomicBoxGuard {
-                container: self,
-                reference: unsafe { raw_ptr.as_ref() }.unwrap(),
-            }),
-            Err(p) => {
-                assert!(p.is_null());
-                None
-            }
-        }
-    }
-
-    unsafe fn decrement_readers(&self) {
-        self.0
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |ptr| {
-                assert!(!ptr.is_null());
-                Some(ptr.map_addr(|addr| {
-                    let addr_portion = addr & 0xFF_FFFF_FFFF_FFFF;
-                    let top_bits = u8::try_from(addr >> 56).unwrap();
-                    let new_count = top_bits.checked_sub(1).unwrap();
-                    addr_portion & (usize::from(new_count) << 56)
-                }))
-            })
-            .unwrap();
-    }
-}
-
-pub struct AtomicBoxGuard<'reference, 'data, T>
-where
-    'data: 'reference,
-{
-    container: &'data AtomicBox<T>,
-    reference: &'reference T,
-}
-
-impl<'reference, 'data, T> Drop for AtomicBoxGuard<'reference, 'data, T> {
-    fn drop(&mut self) {
-        unsafe { self.container.decrement_readers() };
-    }
-}
-
-impl<'reference, 'data, T> Deref for AtomicBoxGuard<'reference, 'data, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.reference
-    }
-}
-
-/// Signal handlers for
-pub(crate) static SIGNAL_HANDLERS: [AtomicBox<SignalInfo>; 4] =
-    [const { unsafe { AtomicBox::new() } }; 4];
-
 /// Rust handler invoked when any exception occurs
-extern "C" fn general_handler(exception_code: u64, arg0: u64, sp: usize) -> ReturnRegs {
+extern "C" fn general_handler(exception_code: u64, arg0: u64) -> ReturnRegs {
     match FromPrimitive::from_u64(exception_code) {
         Some(ExceptionCode::Preemption) => {
             unreachable!("Preemption should not reach the general handler")
@@ -343,7 +205,7 @@ extern "C" fn general_handler(exception_code: u64, arg0: u64, sp: usize) -> Retu
             ReturnRegs { x0, x1 }
         }
         Some(ExceptionCode::UserSignal) => {
-            handle_user_signal(pid_t::try_from(arg0).expect("PID should be valid"));
+            handle_user_signal(u16::try_from(arg0).expect("PID should be valid"));
             ReturnRegs {
                 x0: exception_code,
                 x1: arg0,
@@ -362,33 +224,5 @@ extern "C" fn handle_page_fault(faulting_info: u64) {
 
 /// Handler when a signal is delivered from another process
 extern "C" fn handle_user_signal(sender_pid: u16) {
-    println!("User signal occured! Sender: {sender_pid}");
-    if let Some(handler_info) = SIGNAL_HANDLERS[ExceptionCode::UserSignal as usize].read() {
-        match handler_info.handler {
-            HandlerType::Signal(handler) => unsafe { handler(ExceptionCode::UserSignal as _) },
-            HandlerType::SigAction(handler) => {
-                let siginfo = SigInfo {
-                    si_addr: ptr::null_mut(),
-                    si_band: 0,
-                    // what exactly is this value?
-                    si_value: SigVal {
-                        sival_int: ExceptionCode::UserSignal as _,
-                    },
-                    si_signo: ExceptionCode::UserSignal as _,
-                    si_code: todo!("SI_USER"),
-                    si_errno: 0, // check?
-                    si_status: 0,
-                    si_pid: sender_pid,
-                    si_uid: 0,
-                };
-                unsafe {
-                    handler(
-                        ExceptionCode::UserSignal as _,
-                        addr_of_mut!(siginfo),
-                        ptr::null_mut(),
-                    )
-                }
-            }
-        }
-    }
+    panic!("User signal occured! Sender: {sender_pid}");
 }

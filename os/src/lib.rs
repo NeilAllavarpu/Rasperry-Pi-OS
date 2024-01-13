@@ -83,12 +83,28 @@ pub mod cell;
 pub mod os;
 pub mod sync;
 
+#[inline]
+pub fn write(bytes: &[u8]) -> bool {
+    let status: u64;
+    unsafe {
+        core::arch::asm! {
+            "svc 0x1000",
+            inout("x0") bytes.as_ptr() => status,
+            in("x1") bytes.len(),
+            options(nostack, readonly),
+            clobber_abi("C"),
+        }
+    }
+    match status {
+        0 => true,
+        1 => false,
+        _ => unreachable!("Write syscall returned an invalid success/failure value"),
+    }
+}
 pub struct Stdout;
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        crate::os::syscalls::write(s.as_bytes())
-            .then_some(())
-            .ok_or(Error)
+        write(s.as_bytes()).then_some(()).ok_or(Error)
     }
 }
 

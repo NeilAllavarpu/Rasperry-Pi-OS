@@ -1,4 +1,8 @@
-use crate::println;
+use core::sync::atomic::Ordering;
+
+use common::println;
+
+use crate::exception::CONTEXT;
 
 #[inline]
 #[must_use]
@@ -56,17 +60,13 @@ pub fn exit() -> ! {
 #[inline]
 pub fn exec(context: *mut (), ttbr0: u64, tcr_el1: u64, sp: usize) -> Result<!, ()> {
     let status: u64;
-    println!("LEt the sp be {sp:X}");
     unsafe {
         core::arch::asm! {
-            "mov sp, x20",
-            // "isb",
             "svc 0x4000",
-            "mov x20, sp",
             inlateout("x0") context => status,
             in("x1") ttbr0,
             in("x2") tcr_el1,
-            in("x20") sp,
+            in("x3") sp,
             options(nostack, readonly),
             clobber_abi("C"),
         }
@@ -79,32 +79,73 @@ pub fn exec(context: *mut (), ttbr0: u64, tcr_el1: u64, sp: usize) -> Result<!, 
 }
 
 #[inline]
-pub fn eret() -> ! {
+pub fn getpid() -> u16 {
+    let pid: u64;
     unsafe {
         core::arch::asm! {
-            "svc 0x0",
-            options(nostack, readonly),
-            clobber_abi("C"),
+            "mrs {}, TPIDRRO_EL0",
+            out(reg) pid,
+            options(nomem, nostack, preserves_flags)
         }
     }
-    unreachable!("`eret` should not fall through")
+    pid.try_into().unwrap()
 }
 
 #[inline]
-pub fn unblock(pid: u16) -> Result<(), ()> {
+pub fn fork() -> Option<u16> {
+    let pid = getpid();
     let status: u64;
+    let new_pid: u64;
+    let ra_location = CONTEXT.exception_stack.fetch_ptr_add(1, Ordering::Relaxed);
     unsafe {
         core::arch::asm! {
-            "svc 0x5000",
-            in("x0") pid,
-            lateout("x0") status,
-            options(nostack, readonly),
+            "stp x19, x29, [sp, -16]!",
+            "sub x1, sp, 0x100",
+            "adr x2, {saved_sp}",
+            "str x1, [x2]",
+            "adr x2, 0f",
+            "str x2, [x0]",
+            "svc 0x6000",
+            "0: ldp x19, x29, [sp], 16",
+            saved_sp = sym crate::exception::SP,
+            inlateout("x0") ra_location => status,
+            lateout("x1") new_pid,
+            lateout("x2") _,
+            lateout("x3") _,
+            lateout("x4") _,
+            lateout("x5") _,
+            lateout("x6") _,
+            lateout("x7") _,
+            lateout("x8") _,
+            lateout("x9") _,
+            lateout("x10") _,
+            lateout("x11") _,
+            lateout("x12") _,
+            lateout("x13") _,
+            lateout("x14") _,
+            lateout("x15") _,
+            lateout("x16") _,
+            lateout("x17") _,
+            lateout("x18") _,
+            lateout("x20") _,
+            lateout("x21") _,
+            lateout("x22") _,
+            lateout("x23") _,
+            lateout("x24") _,
+            lateout("x25") _,
+            lateout("x26") _,
+            lateout("x27") _,
+            lateout("x28") _,
+            lateout("x30") _,
+            options(readonly),
             clobber_abi("C"),
         }
     };
-    match status {
-        0 => Ok(()),
-        1 => Err(()),
-        _ => unreachable!("Unblock syscall returned an invalid success/failure value"),
+    let mypid = getpid();
+    println!("my pid {mypid} returned pid {new_pid} old pid {pid}");
+    if pid == mypid {
+        Some(new_pid.try_into().unwrap())
+    } else {
+        None
     }
 }

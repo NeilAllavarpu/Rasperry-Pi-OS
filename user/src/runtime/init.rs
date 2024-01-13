@@ -82,7 +82,7 @@ unsafe extern "C" fn start(sp: Option<NonNull<u128>>) -> ! {
     let ttbr0_virtual = unsafe { reader.read::<usize>() };
     // SAFETY: The caller promises that the arguments region is safe
     let arg_count = unsafe { reader.read::<u16>() }.into();
-    println!("Argucountu {:X}", arg_count);
+
     // SAFETY: The caller promises that the arguments region is safe
     let arg_lens = unsafe { reader.read_slice::<u16>(arg_count) };
 

@@ -3,7 +3,7 @@ use core::{arch::asm, ptr};
 use macros::AsBits;
 
 use crate::{
-    execution::{self, ExceptionCode},
+    execution::{self, ExceptionCode, EXECUTIONS},
     machine::faulting_address,
     println,
 };
@@ -51,8 +51,10 @@ pub(super) struct PageFaultInfo {
 /// Resolves a page fault by either autofilling the translation, or invoking the execution's page fault handler
 pub(super) fn resolve_page_fault(info: &PageFaultInfo, x0: usize, x1: usize) -> (usize, usize) {
     println!("PAGE FAULT: {:X?}", info.faulting_address);
-    let current = execution::current()
-        .expect("Page faults should not trigger outside the context of an `Execution`");
+    let executions = EXECUTIONS.read();
+    let current = executions
+        .get(execution::current())
+        .expect("Page faults should not trigger outside the context of a valid `Execution`");
     let call_signal = {
         if let StatusCode::TranslationFault = info.code {
             // CHECK: Is it possible for a translation fault to have an invalid FAR?

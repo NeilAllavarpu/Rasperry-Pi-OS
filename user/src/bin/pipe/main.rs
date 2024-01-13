@@ -69,6 +69,7 @@ mod service_channel;
 extern "C" fn main() -> ! {
     // simple_signal(handle_message)
     let mut count = 0;
+    println!d("Pipin time");
     loop {
         syscalls::block();
         println!("Simple signal: {count}!");

@@ -1,6 +1,5 @@
 //! ELF loading capabilities
 
-use crate::os::syscalls::alloc_page;
 use crate::os::vm::ADDRESS_SPACE;
 use crate::println;
 
@@ -11,6 +10,27 @@ use core::mem;
 use core::ptr::NonNull;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+
+#[inline]
+#[must_use]
+pub fn alloc_page() -> Option<u64> {
+    let page: u64;
+    let status: u64;
+    unsafe {
+        core::arch::asm! {
+            "svc 0x3000",
+            out("x0") status,
+            out("x1") page,
+            options(nomem, nostack),
+            clobber_abi("C"),
+        }
+    };
+    match status {
+        0 => Some(page),
+        1 => None,
+        _ => unreachable!("Allocate page syscall returned an invalid success/failure value"),
+    }
+}
 
 /// ELF's register width
 #[derive(Debug, FromPrimitive)]
@@ -241,7 +261,7 @@ where
                 if header.offset & page_mask != header.va & page_mask {
                     return Err(ElfLoadError::Alignment);
                 }
-                println!("p_type {:X}", header.p_type);
+
                 match FromPrimitive::from_u32(header.p_type).ok_or(ElfLoadError::HeaderType)? {
                     ProgramHeaderType::Load => {
                         let virtual_start = header.va & !page_mask;
@@ -253,7 +273,6 @@ where
                                 .ok_or(ElfLoadError::UnexpectedEoF)?,
                             PAGE_BITS,
                         );
-                        println!("range is {:X} to {:X}", virtual_start, virtual_backed_range);
                         if virtual_start <= entry && entry <= virtual_start + virtual_backed_range {
                             assert!(ctx_addr.is_none());
                             let e_as_bytes = unsafe {

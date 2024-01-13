@@ -109,20 +109,11 @@ pub unsafe fn exec(
     // SAFETY: The caller promises safety of the arguments, and this ASM block properly invokes `exec`
     unsafe {
         core::arch::asm! {
-            "mov x3, sp",
-            "adr x4, {sp_saved}",
-            "str x3, [x4]",
-            "mov sp, {sp}",
-            "svc 0x4000", // <-- TODO: If preemption occurs here, SP is corrupt!
-            "ldr x3, {sp_saved}",
-            "mov sp, x3",
-            sp = in(reg) sp,
-            sp_saved = sym exception::SP,
+            "svc 0x4000",
             inlateout("x0") context => status,
             in("x1") ttbr0,
             in("x2") tcr_el1,
-            out("x3") _,
-            out("x4") _,
+            in("x3") sp,
             options(nostack, readonly),
             clobber_abi("C"),
         }

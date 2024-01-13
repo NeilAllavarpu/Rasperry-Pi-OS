@@ -2,6 +2,7 @@
 
 use core::{arch::asm, ptr};
 
+use alloc::sync::Arc;
 use bitfield_struct::bitfield;
 use macros::AsBits;
 
@@ -25,6 +26,7 @@ pub(super) enum CallCode {
     Unblock = 0x5000,
     Block = 0x6000,
     SendSignal = 0x7000,
+    Fork = 0x8000,
     Eret = 0x0,
 }
 
@@ -96,19 +98,11 @@ enum SetContextFailure {
 
 /// Handles an `eret`
 pub fn handle_eret() {
-    let execution = execution::current()
-        .expect("Current execution should be set when receiving a syscall from usermode");
-    let return_address = execution.user_context().pop();
-    println!("ERET: {return_address:X}");
-    let sp: u64;
-    unsafe {
-        asm! {
-            "mrs {}, SP_EL0",
-            out(reg) sp,
-            options(nomem, nostack, preserves_flags)
-        }
-    }
-    println!("sp at {:X}", sp);
+    let executions = EXECUTIONS.read();
+    let current = executions
+        .get(execution::current())
+        .expect("Page faults should not trigger outside the context of a valid `Execution`");
+    let return_address = current.user_context().pop();
     unsafe {
         asm! {
             "msr ELR_EL1, {}",
@@ -120,9 +114,7 @@ pub fn handle_eret() {
 
 #[allow(clippy::too_many_lines)]
 /// The general system call handler; dispatches to more specific handlers in other files
-pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
-    let execution = execution::current()
-        .expect("Current execution should be set when receiving a syscall from usermode");
+pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64, arg3: u64) -> Return {
     let esr_el1: u64;
     // SAFETY: This does not touch anything but ESR_EL1 to safely read its value
     unsafe {
@@ -136,7 +128,7 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
     let esr = ExceptionSyndrome::from(esr_el1);
     let iss = unsafe { esr.instruction_syndrome().svc };
     match iss.code() {
-        CallCode::Exit => execution.exit(),
+        CallCode::Exit => Execution::exit(execution::current()),
         CallCode::Print => {
             let data_ptr: *const u8 = ptr::from_exposed_addr(
                 usize::try_from(arg0).expect("usizes and u64s should be interchangeable"),
@@ -158,23 +150,20 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
                 .alloc()
             {
                 let addr = result.addr();
-                execution.add_writable_page(result);
+                EXECUTIONS
+                    .read()
+                    .get(execution::current())
+                    .unwrap()
+                    .add_writable_page(result);
                 success!(addr)
             } else {
                 fail!()
             }
         }
         CallCode::SetInfo => {
-            let sp: u64;
-            unsafe {
-                asm! {
-                    "mrs {}, SP_EL0",
-                    out(reg) sp,
-                    options(nomem, nostack, preserves_flags)
-                }
-            }
-            println!("otha sp at {:X}", sp);
-            match execution.set_context(
+            let executions = EXECUTIONS.read();
+            let current = executions.get(execution::current()).unwrap();
+            match current.set_context(
                 ptr::from_exposed_addr(
                     usize::try_from(arg0).expect("`u64` should always fit into `usize`"),
                 ),
@@ -182,7 +171,12 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
                 arg2,
             ) {
                 Ok(()) => {
-                    execution.jump_into_async(ExceptionCode::Resumption, 0);
+                    Execution::jump_into_async(
+                        executions,
+                        execution::current(),
+                        ExceptionCode::Resumption,
+                        arg3,
+                    );
                 }
                 #[expect(clippy::as_conversions)]
                 Err(err) => fail!(match err {
@@ -208,7 +202,7 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
         CallCode::Unblock => {
             let status = u16::try_from(arg0)
                 .ok()
-                .and_then(|pid| EXECUTIONS.lock().get(pid).map(Execution::unblock))
+                .and_then(|pid| EXECUTIONS.read().get(pid).map(Execution::unblock))
                 .is_some();
             if status {
                 success!()
@@ -217,15 +211,23 @@ pub extern "C" fn handle(arg0: u64, arg1: u64, arg2: u64) -> Return {
             }
         }
         CallCode::Block => {
-            execution.block();
+            Execution::block(execution::current());
             success!()
         }
         CallCode::SendSignal => {
-            if let Some(target) = EXECUTIONS.lock().get(arg0.try_into().unwrap()) {
-                target.add_signal(execution.pid);
+            if let Some(target) = EXECUTIONS.read().get(arg0.try_into().unwrap()) {
+                target.add_signal(execution::current());
                 success!()
             } else {
                 fail!()
+            }
+        }
+        CallCode::Fork => {
+            if let Ok(new_execution) = EXECUTIONS.write().fork(execution::current()) {
+                execution::add_to_running(new_execution);
+                success!(new_execution.into())
+            } else {
+                todo!("out of mem")
             }
         }
     }
